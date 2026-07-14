@@ -4,24 +4,58 @@ import { Eye, EyeOff, Lock, Mail, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
+import { useAccount } from "wagmi";
 
 import BrandLogo from "@/components/brand/BrandLogo";
+import { supabase } from "@/lib/supabase";
 
 interface LoginForm {
   email: string;
   password: string;
 }
 
+
 export default function LoginPage() {
   const router = useRouter();
   const [form, setForm] = useState<LoginForm>({ email: "", password: "" });
   const [showPassword, setShowPassword] = useState(false);
   const [showResetMessage, setShowResetMessage] = useState(false);
+   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const { openConnectModal } = useConnectModal();
+  const { address, isConnected } = useAccount();
 
   function updateField(field: keyof LoginForm, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
   }
 
+  async function handleLogin() {
+    setError(null);
+
+    if (!form.email || !form.password) {
+      setError("Please enter both email and password.");
+      return;
+    }
+
+    setIsLoading(true);
+
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
+      email: form.email,
+      password: form.password,
+    });
+
+    setIsLoading(false);
+
+    if (signInError) {
+      setError(signInError.message);
+      return;
+    }
+
+    if (data.session) {
+      router.push("/dashboard");
+    }
+  } 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-agri-base px-4 py-10">
       <div className="pointer-events-none absolute -left-20 -top-20 h-72 w-72 rounded-full bg-accent-green/8 blur-3xl" />
@@ -38,11 +72,17 @@ export default function LoginPage() {
         >
           Welcome back
         </h2>
+
         <p className="mb-6 mt-1 text-center text-sm text-agri-muted">
           Sign in to continue tracing verified produce.
         </p>
 
-        <form className="flex flex-col gap-4">
+        <form className="flex flex-col gap-4"
+           onSubmit={(event)=> {
+             event.preventDefault();
+               handleLogin();
+           }}
+            >
           <label className="block">
             <span className="mb-1 block text-sm text-agri-muted">Email</span>
             <div className="relative">
@@ -93,12 +133,18 @@ export default function LoginPage() {
             ) : null}
           </label>
 
+          {error ? (
+            <p className="text-sm text-red-500" role="alert">
+              {error}
+            </p>
+          ) : null}
+
           <button
             className="w-full rounded-lg bg-accent-blue py-2.5 font-medium text-white transition-shadow hover:bg-accent-blue/90 hover:shadow-[0_0_24px_rgba(59,130,246,0.4)]"
-            type="button"
-            onClick={() => router.push("/dashboard")}
+            type="submit"
+            disabled={isLoading}
           >
-            Sign In
+            {isLoading ? "Signing in..." : "Sign In"}
           </button>
         </form>
 
@@ -111,10 +157,15 @@ export default function LoginPage() {
         <button
           className="flex w-full items-center justify-center gap-2 rounded-lg border border-agri-border py-2.5 text-sm font-medium text-agri-text hover:bg-agri-raised"
           type="button"
-          onClick={() => router.push("/onboarding")}
+         onClick={() => {
+            if (isConnected) return;
+            openConnectModal?.();
+          }}
         >
           <Wallet className="h-4 w-4" />
-          Connect Web3 Wallet
+         {isConnected && address
+            ? `${address.slice(0, 6)}...${address.slice(-4)}`
+            : "Connect Web3 Wallet"}
         </button>
 
         <p className="mt-4 text-center text-sm text-agri-muted">

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono, Outfit } from "next/font/google";
 import "./globals.css";
+import { Providers } from "./providers";
 
 const outfit = Outfit({
   weight: ["600", "700", "800"],
@@ -36,7 +37,7 @@ export default function RootLayout({
       className={`${outfit.variable} ${inter.variable} ${jetBrainsMono.variable} h-full antialiased`}
     >
       <body className={`${inter.className} min-h-full bg-agri-base text-agri-text`}>
-        {children}
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

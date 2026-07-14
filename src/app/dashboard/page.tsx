@@ -15,7 +15,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
 import {
   Bar,
   BarChart,
@@ -29,8 +28,10 @@ import {
 import { PRIMARY_BATCH, PRIMARY_USER } from "@/lib/mockData";
 import type { UserRole } from "@/types";
 import { MiniTimeline } from "@/components/ui/MiniTimeline";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
-const MOCK_ROLE: UserRole = "FARMER";
 
 const batchRows = [
   { id: PRIMARY_BATCH.batchId, crop: `${PRIMARY_BATCH.cropType} · ${PRIMARY_BATCH.quantityKg} kg` },
@@ -67,7 +68,7 @@ function GradientCard({
   bgClassName?: string;
 }) {
   return (
-    <div className={`rounded-xl bg-gradient-to-br from-agri-border via-agri-border/60 to-transparent p-px ${className}`}>
+    <div className={`rounded-xl bg-linear-to-br from-agri-border via-agri-border/60 to-transparent p-px ${className}`}>
       <div className={`h-full rounded-xl ${bgClassName} shadow-[0_18px_50px_rgba(0,0,0,0.22)] backdrop-blur-sm`}>
         {children}
       </div>
@@ -204,7 +205,7 @@ function FarmerDashboard() {
             <div className="divide-y divide-agri-border">
               {batchRows.map((batch) => (
                 <div key={batch.id} className="flex items-center gap-6 py-4">
-                  <div className="min-w-[160px]">
+                  <div className="min-w-40">
                     <Link
                       className="font-mono text-sm font-bold text-agri-text hover:text-accent-blue"
                       href={`/dashboard/trace/${batch.id}`}
@@ -236,7 +237,7 @@ function FarmerDashboard() {
               ["AGT-0035 Quality Grade Certificate", "NAFDAC-0031 · Jun 03, 2026"],
             ].map(([title, meta]) => (
               <div key={title} className="flex items-start gap-3 border-b border-agri-border py-3 last:border-0">
-                <Award className="h-[18px] w-[18px] flex-shrink-0 text-accent-purple" />
+                <Award className="h-4.5 w-4.5 shrink-0 text-accent-purple" />
                 <div>
                   <p className="text-sm font-medium text-agri-text">{title}</p>
                   <p className="text-xs text-agri-muted">{meta}</p>
@@ -260,7 +261,7 @@ function FarmerDashboard() {
 
               return (
                 <div key={id} className="flex items-start gap-3 border-b border-agri-border py-3 last:border-0">
-                  <Icon className={`h-[18px] w-[18px] flex-shrink-0 ${color}`} />
+                  <Icon className={`h-4.5 w-4.5 shrink-0 ${color}`} />
                   <div className="flex-1">
                     <p className={`text-sm font-medium ${isComplete ? "text-agri-muted line-through" : "text-agri-text"}`}>
                       {task}
@@ -433,12 +434,12 @@ function RegulatorDashboard() {
               ["bg-accent-amber", "Incomplete documentation for Batch AGT-1044", "Niger Delta Rice Farms, Rivers"],
             ].map(([dot, alert, meta]) => (
               <div key={alert} className="flex items-start gap-3 border-b border-agri-border py-3 last:border-0">
-                <span className={`mt-1.5 h-2 w-2 flex-shrink-0 rounded-full ${dot}`} />
+                <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`} />
                 <div>
                   <p className="text-sm font-medium text-agri-text">{alert}</p>
                   <p className="text-xs text-agri-muted">{meta}</p>
                 </div>
-                <Link className="ml-auto flex-shrink-0 text-xs text-accent-blue" href="/dashboard/compliance">
+                <Link className="ml-auto shrink-0 text-xs text-accent-blue" href="/dashboard/compliance">
                   Review
                 </Link>
               </div>
@@ -486,9 +487,50 @@ function RegulatorDashboard() {
 }
 
 export default function DashboardPage() {
-  if (MOCK_ROLE === "REGULATOR") {
+  const router = useRouter();
+  const [role, setRole] = useState<UserRole | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadRole() {
+      const { data: sessionData } = await supabase.auth.getSession();
+
+      if (!sessionData.session) {
+        router.push("/login");
+        return;
+      }
+
+      const { data: userData, error } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", sessionData.session.user.id)
+        .maybeSingle();
+
+      if (error || !userData) {
+        // No profile row yet — send them to finish onboarding.
+        router.push("/onboarding");
+        return;
+      }
+
+      setRole(userData.role as UserRole);
+      setIsLoading(false);
+    }
+
+    loadRole();
+  }, [router]);
+
+  if (isLoading || !role) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-agri-base">
+        <p className="text-agri-muted">Loading dashboard...</p>
+      </div>
+    );
+  }
+
+  if (role === "REGULATOR") {
     return <RegulatorDashboard />;
   }
 
   return <FarmerDashboard />;
 }
+

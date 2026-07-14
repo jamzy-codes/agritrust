@@ -12,14 +12,17 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+
 
 import BrandLogo from "@/components/brand/BrandLogo";
-import { PRIMARY_USER } from "@/lib/mockData";
+import { supabase } from "@/lib/supabase";
 import type { UserRole } from "@/types";
 
 interface TopBarProps {
   searchPlaceholder?: string;
   userName?: string;
+  email?: string;
   role?: UserRole;
   initials?: string;
   onMenuClick?: () => void;
@@ -45,14 +48,21 @@ const roleStyles: Record<UserRole, { avatar: string }> = {
 
 export default function TopBar({
   searchPlaceholder = "Search AgriTrust...",
-  userName = PRIMARY_USER.name,
-  role = PRIMARY_USER.role,
-  initials = PRIMARY_USER.initials,
+  userName = "User",
+  email = "innovaro@gmail.com",
+  role = "FARMER",
+  initials = "U",
   onMenuClick,
 }: TopBarProps) {
   const [isAlertsOpen, setIsAlertsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const styles = roleStyles[role];
+  const router = useRouter();   
+  async function handleLogout() {
+    setIsProfileOpen(false);
+    await supabase.auth.signOut();
+    router.push("/login");
+  }
 
   return (
     <>
@@ -121,7 +131,7 @@ export default function TopBar({
 
                 <div className="cursor-pointer px-4 py-3 hover:bg-agri-raised">
                   <div className="flex items-start gap-3">
-                    <span className="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-accent-red" />
+                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent-red" />
                     <div className="flex-1">
                       <p className="text-sm font-medium text-agri-text">
                         Batch AGT-1103 flagged: GMO disclosure missing
@@ -135,7 +145,7 @@ export default function TopBar({
 
                 <div className="cursor-pointer border-t border-agri-border px-4 py-3 hover:bg-agri-raised">
                   <div className="flex items-start gap-3">
-                    <span className="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-accent-amber" />
+                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent-amber" />
                     <div className="flex-1">
                       <p className="text-sm font-medium text-agri-text">
                         Farm ID #0892 inspection overdue
@@ -149,7 +159,7 @@ export default function TopBar({
 
                 <div className="cursor-pointer border-t border-agri-border px-4 py-3 hover:bg-agri-raised">
                   <div className="flex items-start gap-3">
-                    <span className="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-accent-amber" />
+                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent-amber" />
                     <div className="flex-1">
                       <p className="text-sm font-medium text-agri-text">
                         AGT-0041 awaiting inspection
@@ -181,7 +191,7 @@ export default function TopBar({
               }}
             >
               <div
-                className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${styles.avatar}`}
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${styles.avatar}`}
               >
                 {initials}
               </div>
@@ -194,9 +204,8 @@ export default function TopBar({
                 </p>
               </div>
               <ChevronDown
-                className={`ml-1 h-3.5 w-3.5 flex-shrink-0 text-agri-muted transition-transform duration-200 ${
-                  isProfileOpen ? "rotate-180" : ""
-                }`}
+                className={`ml-1 h-3.5 w-3.5 shrink-0 text-agri-muted transition-transform duration-200 ${isProfileOpen ? "rotate-180" : ""
+                  }`}
               />
             </button>
 
@@ -207,10 +216,10 @@ export default function TopBar({
               >
                 <div className="border-b border-agri-border px-4 py-3">
                   <p className="text-sm font-semibold text-agri-text">
-                    {PRIMARY_USER.name}
+                    {userName}
                   </p>
                   <p className="mt-0.5 text-xs text-agri-muted">
-                    {PRIMARY_USER.email}
+                    {email}
                   </p>
                 </div>
 
@@ -241,14 +250,14 @@ export default function TopBar({
 
                 <div className="mx-3 my-1 h-px bg-agri-border" />
 
-                <Link
-                  href="/login"
-                  className="flex cursor-pointer items-center gap-3 px-4 py-2.5 text-sm text-accent-red transition-colors hover:bg-accent-red/10"
-                  onClick={() => setIsProfileOpen(false)}
+                <button
+                  type="button"
+                  className="flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left text-sm text-accent-red transition-colors hover:bg-accent-red/10"
+                  onClick={handleLogout}
                 >
                   <LogOut className="h-4 w-4" />
                   Logout
-                </Link>
+                </button>
               </div>
             )}
           </div>
