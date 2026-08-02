@@ -45,11 +45,12 @@ contract ComplianceRegistry {
         address issuedBy;
     }
 
-    address public owner;
+    address public immutable regulator;
     IProduceRegistry public produceRegistry;
 
-    mapping(address => bool) private inspectors;
-    mapping(address => bool) private regulators;
+
+
+    mapping(address => bool) public approvedInspectors;
 
     mapping(string => Inspection) private inspections;
     mapping(string => bool) private inspectionExists;
@@ -69,40 +70,46 @@ contract ComplianceRegistry {
     event CertificateIssued(
         string certId,
         string batchId,
-        address issuedBy,
+        address indexed issuedBy,
         uint256 issuedAt
     );
     event CertificateRevoked(string certId, string batchId, string reason);
+    event InspectorAdded(address inspector);
+    event InspectorRemoved(address inspector);
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Not contract owner");
-        _;
-    }
+   
 
     modifier onlyInspector() {
-        require(inspectors[msg.sender], "Not an inspector");
+        require(approvedInspectors[msg.sender], "Not an inspector");
         _;
     }
 
     modifier onlyRegulator() {
-        require(regulators[msg.sender], "Not a regulator");
+        require(msg.sender == regulator, "Not a regulator");
         _;
     }
 
-    constructor(address _produceRegistry) {
-        owner = msg.sender;
+    constructor(address _produceRegistry , address _regulator) {
         produceRegistry = IProduceRegistry(_produceRegistry);
+        regulator = _regulator;
     }
 
     // --- Setup functions ---
 
-    function addInspector(address account) external onlyOwner {
-        inspectors[account] = true;
+    function addInspector(address inspector) external onlyRegulator {
+        approvedInspectors[inspector] = true;
+        emit InspectorAdded(inspector);
     }
 
-    function addRegulator(address account) external onlyOwner {
-        regulators[account] = true;
-    }
+
+   function removeInspector (address inspector) external onlyRegulator{
+    approvedInspectors[inspector] = false;
+    emit InspectorRemoved(inspector);
+   }
+  function isApprovedInspector(address wallet) external view  returns (bool) {
+    return approvedInspectors[wallet];
+  }
+ 
 
     // --- Core functions ---
 
