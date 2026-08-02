@@ -22,7 +22,7 @@ contract ProduceRegistry {
         address registeredBy;
     }
 
-    address public owner;
+    address public immutable owner;
 
     // Addresses of the two sibling contracts allowed to call updateBatchStatus
     address public complianceRegistry;
@@ -38,12 +38,13 @@ contract ProduceRegistry {
     event BatchRegistered(
         string batchId,
         string farmId,
-        address registeredBy,
+        address indexed registeredBy,
         uint256 registeredAt
     );
     event BatchStatusChanged(string batchId, BatchStatus newStatus);
     event BatchFlagged(string batchId, string reason);
-
+    event ComplianceRegistryUpdated(address indexed newRegistry);
+   event SupplyChainLedgerUpdated(address indexed newLedger);
     modifier onlyOwner() {
         require(msg.sender == owner, "Not contract owner");
         _;
@@ -68,13 +69,7 @@ contract ProduceRegistry {
 
     // --- Setup functions (called once after all three contracts are deployed) ---
 
-    function setComplianceRegistry(address _complianceRegistry) external onlyOwner {
-        complianceRegistry = _complianceRegistry;
-    }
-
-    function setSupplyChainLedger(address _supplyChainLedger) external onlyOwner {
-        supplyChainLedger = _supplyChainLedger;
-    }
+    
 
     function addRegulator(address account) external onlyOwner {
         isRegulator[account] = true;
@@ -129,6 +124,18 @@ contract ProduceRegistry {
         batches[batchId].status = newStatus;
         emit BatchStatusChanged(batchId, newStatus);
     }
+
+  function setComplianceRegistry(address newComplianceRegistry) external onlyOwner {
+    require(newComplianceRegistry != address(0), "Zero address not allowed");
+    complianceRegistry = newComplianceRegistry;
+    emit ComplianceRegistryUpdated(newComplianceRegistry);
+}
+
+function setSupplyChainLedger(address newSupplyChainLedger) external onlyOwner {
+    require(newSupplyChainLedger != address(0), "Zero address not allowed");
+    supplyChainLedger = newSupplyChainLedger;
+    emit SupplyChainLedgerUpdated(newSupplyChainLedger);
+}
 
     function flagBatch(string calldata batchId, string calldata reason) external onlyRegulator {
         require(batchExists[batchId], "Batch not found");

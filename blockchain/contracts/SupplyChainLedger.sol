@@ -28,9 +28,9 @@ contract SupplyChainLedger {
     }
 
     address public immutable regulator;
-    IProduceRegistry public produceRegistry;
+    IProduceRegistry public immutable  produceRegistry;
 
-    mapping (address => bool) public approvedDistrubtors;
+    mapping (address => bool) public approvedDistributors;
 
     mapping(string => Handoff[]) private handoffHistory;
     mapping(string => address) private currentCustodian;
@@ -43,20 +43,21 @@ contract SupplyChainLedger {
         uint256 timestamp
     );
     event BatchDelivered(string batchId, string location, uint256 timestamp);
-    event DistributorAdded(address distributor);
-    event DistributorRemoved(address distributor);
+    event DistributorAdded(address indexed distributor);
+    event DistributorRemoved(address indexed  distributor);
 
      modifier onlyRegulator() {
          require(msg.sender == regulator, "Not a Regulator");
          _;
      }
 
-     modifier onlyDistrubutor(){
+     modifier onlyDistributor(){
         require(approvedDistributors[msg.sender] , "Not an approved distributor");
         _;
      }
 
     constructor(address _produceRegistry , address _regulator) {
+        require(_regulator != address(0), "Zero address not allowed");
         produceRegistry = IProduceRegistry(_produceRegistry);
         regulator = _regulator;
     }
@@ -67,13 +68,13 @@ contract SupplyChainLedger {
     }
 
 
-   function removeDistrubutor(address distributor) external onlyRegulator {
+   function removeDistributor(address distributor) external onlyRegulator {
       approvedDistributors[distributor] = false;
-      emit DistributorRemoved(distrbutor);
+      emit DistributorRemoved(distributor);
    }
    
-  function isApprovedDistributor(address wallet) exernal view returns (bool){
-     return approvedDistributor[wallet];
+  function isApprovedDistributor(address wallet) external view returns (bool){
+     return approvedDistributors[wallet];
   }
 
     function recordHandoff(
@@ -84,7 +85,7 @@ contract SupplyChainLedger {
         string calldata condition,
         string calldata transportMethod,
         uint256 quantityKg
-    ) external {
+    ) external onlyDistributor {
         address fromWallet = batchStarted[batchId] ? currentCustodian[batchId] : msg.sender;
 
         handoffHistory[batchId].push(
@@ -110,7 +111,7 @@ contract SupplyChainLedger {
         produceRegistry.updateBatchStatus(batchId, IProduceRegistry.BatchStatus.IN_TRANSIT);
     }
 
-    function recordDelivery(string calldata batchId, string calldata location) external {
+    function recordDelivery(string calldata batchId, string calldata location) external onlyDistributor {
         emit BatchDelivered(batchId, location, block.timestamp);
 
         produceRegistry.updateBatchStatus(batchId, IProduceRegistry.BatchStatus.DELIVERED);

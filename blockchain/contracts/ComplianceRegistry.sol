@@ -46,7 +46,8 @@ contract ComplianceRegistry {
     }
 
     address public immutable regulator;
-    IProduceRegistry public produceRegistry;
+    IProduceRegistry public immutable produceRegistry;
+
 
 
 
@@ -74,8 +75,8 @@ contract ComplianceRegistry {
         uint256 issuedAt
     );
     event CertificateRevoked(string certId, string batchId, string reason);
-    event InspectorAdded(address inspector);
-    event InspectorRemoved(address inspector);
+    event InspectorAdded(address indexed  inspector);
+    event InspectorRemoved(address indexed inspector);
 
    
 
@@ -89,11 +90,11 @@ contract ComplianceRegistry {
         _;
     }
 
-    constructor(address _produceRegistry , address _regulator) {
-        produceRegistry = IProduceRegistry(_produceRegistry);
-        regulator = _regulator;
-    }
-
+   constructor(address _produceRegistry, address _regulator) {
+    require(_regulator != address(0), "Zero address not allowed");
+    produceRegistry = IProduceRegistry(_produceRegistry);
+    regulator = _regulator;
+}
     // --- Setup functions ---
 
     function addInspector(address inspector) external onlyRegulator {
