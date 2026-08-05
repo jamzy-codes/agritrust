@@ -6,13 +6,13 @@ import type { ProduceRegistry, SupplyChainLedger } from "../typechain-types";
 describe("SupplyChainLedger", function () {
   let produceRegistry: ProduceRegistry;
   let supplyChainLedger: SupplyChainLedger;
-  let owner: any, farmer: any, distributor: any, retailer: any;
+  let owner: any, farmer: any, distributor: any, retailer: any, regulator: any, randomUser: any;
 
   const batchId = "AGT-0001";
   const farmId = "FARM-001";
 
   beforeEach(async function () {
-    [owner, farmer, distributor, retailer] = await ethers.getSigners();
+    [owner, farmer, distributor, retailer, regulator, randomUser] = await ethers.getSigners();
 
     const ProduceRegistryFactory = await ethers.getContractFactory("ProduceRegistry");
     produceRegistry = (await ProduceRegistryFactory.deploy()) as unknown as ProduceRegistry;
@@ -20,13 +20,17 @@ describe("SupplyChainLedger", function () {
 
     const SupplyChainLedgerFactory = await ethers.getContractFactory("SupplyChainLedger");
     supplyChainLedger = (await SupplyChainLedgerFactory.deploy(
-      await produceRegistry.getAddress()
+      await produceRegistry.getAddress(),
+      regulator.address
     )) as unknown as SupplyChainLedger;
     await supplyChainLedger.waitForDeployment();
 
     await produceRegistry
       .connect(owner)
       .setSupplyChainLedger(await supplyChainLedger.getAddress());
+
+    await supplyChainLedger.connect(regulator).addDistributor(distributor.address);
+    await supplyChainLedger.connect(regulator).addDistributor(retailer.address);
 
     await produceRegistry
       .connect(farmer)
@@ -77,6 +81,14 @@ describe("SupplyChainLedger", function () {
       const custodian = await supplyChainLedger.getCurrentCustodian(batchId);
       expect(custodian).to.equal(retailer.address);
     });
+
+    it("rejects a handoff from a non-approved distributor", async function () {
+      await expect(
+        supplyChainLedger
+          .connect(randomUser)
+          .recordHandoff(batchId, "Farm Gate", "Logistics Co", "Hub A", "Good", "Truck", 495)
+      ).to.be.revertedWith("Not an approved distributor");
+    });
   });
 
   describe("Recording delivery", function () {
@@ -96,12 +108,40 @@ describe("SupplyChainLedger", function () {
       const batch = await produceRegistry.getBatch(batchId);
       expect(batch.status).to.equal(3); // DELIVERED
     });
+
+    it("rejects delivery from a non-approved distributor", async function () {
+      await expect(
+        supplyChainLedger.connect(randomUser).recordDelivery(batchId, "Lagos Central Market")
+      ).to.be.revertedWith("Not an approved distributor");
+    });
   });
 
   describe("Empty history", function () {
     it("returns an empty array for a batch with no handoffs yet", async function () {
       const history = await supplyChainLedger.getHandoffHistory(batchId);
       expect(history.length).to.equal(0);
+    });
+  });
+
+  describe("Distributor allowlist management", function () {
+    it("rejects addDistributor from a non-regulator", async function () {
+      await expect(
+        supplyChainLedger.connect(randomUser).addDistributor(randomUser.address)
+      ).to.be.revertedWith("Not a Regulator");
+    });
+
+    it("allows the regulator to add and remove a distributor", async function () {
+      await expect(supplyChainLedger.connect(regulator).addDistributor(randomUser.address))
+        .to.emit(supplyChainLedger, "DistributorAdded")
+        .withArgs(randomUser.address);
+
+      expect(await supplyChainLedger.isApprovedDistributor(randomUser.address)).to.equal(true);
+
+      await expect(supplyChainLedger.connect(regulator).removeDistributor(randomUser.address))
+        .to.emit(supplyChainLedger, "DistributorRemoved")
+        .withArgs(randomUser.address);
+
+      expect(await supplyChainLedger.isApprovedDistributor(randomUser.address)).to.equal(false);
     });
   });
 });
