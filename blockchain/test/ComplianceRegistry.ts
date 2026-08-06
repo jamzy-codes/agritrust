@@ -33,7 +33,8 @@ describe("ComplianceRegistry", function () {
 
     const ComplianceRegistryFactory = await ethers.getContractFactory("ComplianceRegistry");
     complianceRegistry = (await ComplianceRegistryFactory.deploy(
-      await produceRegistry.getAddress()
+      await produceRegistry.getAddress(),
+      regulator.address
     )) as unknown as ComplianceRegistry;
     await complianceRegistry.waitForDeployment();
 
@@ -42,8 +43,7 @@ describe("ComplianceRegistry", function () {
       .connect(owner)
       .setComplianceRegistry(await complianceRegistry.getAddress());
 
-    await complianceRegistry.connect(owner).addInspector(inspector.address);
-    await complianceRegistry.connect(owner).addRegulator(regulator.address);
+    await complianceRegistry.connect(regulator).addInspector(inspector.address);
 
     await produceRegistry
       .connect(farmer)
@@ -74,7 +74,6 @@ describe("ComplianceRegistry", function () {
       expect(inspection.qualityGrade).to.equal("Grade A");
       expect(inspection.meetsNAFDACStandards).to.equal(true);
 
-      // Confirm the cross-contract call actually updated ProduceRegistry
       const batch = await produceRegistry.getBatch(batchId);
       expect(batch.status).to.equal(1); // INSPECTED
     });
@@ -152,6 +151,28 @@ describe("ComplianceRegistry", function () {
       await expect(
         complianceRegistry.connect(farmer).revokeCertificate(batchId, "Fraud suspected")
       ).to.be.revertedWith("Not a regulator");
+    });
+  });
+
+  describe("Inspector allowlist management", function () {
+    it("rejects addInspector from a non-regulator", async function () {
+      await expect(
+        complianceRegistry.connect(randomUser).addInspector(randomUser.address)
+      ).to.be.revertedWith("Not a regulator");
+    });
+
+    it("allows the regulator to add and remove an inspector", async function () {
+      await expect(complianceRegistry.connect(regulator).addInspector(randomUser.address))
+        .to.emit(complianceRegistry, "InspectorAdded")
+        .withArgs(randomUser.address);
+
+      expect(await complianceRegistry.isApprovedInspector(randomUser.address)).to.equal(true);
+
+      await expect(complianceRegistry.connect(regulator).removeInspector(randomUser.address))
+        .to.emit(complianceRegistry, "InspectorRemoved")
+        .withArgs(randomUser.address);
+
+      expect(await complianceRegistry.isApprovedInspector(randomUser.address)).to.equal(false);
     });
   });
 });

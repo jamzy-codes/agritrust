@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
+
 import "./interfaces/IRoleRegistry.sol";
+
 contract ProduceRegistry {
     enum BatchStatus {
         REGISTERED,
@@ -9,7 +11,7 @@ contract ProduceRegistry {
         DELIVERED,
         FLAGGED
     }
- enum Role { NONE, FARMER, INSPECTOR, DISTRIBUTOR, REGULATOR }
+
     struct Batch {
         string batchId;
         string farmId;
@@ -23,19 +25,14 @@ contract ProduceRegistry {
     }
 
     address public immutable owner;
-   IRoleRegistry public immutable roleRegistry;
+    IRoleRegistry public immutable roleRegistry;
 
-    // Addresses of the two sibling contracts allowed to call updateBatchStatus
     address public complianceRegistry;
     address public supplyChainLedger;
 
     mapping(string => Batch) private batches;
     mapping(string => bool) private batchExists;
     mapping(string => string[]) private farmBatches;
-    mapping(address => Role) public roles;
-
-    event RoleAssigned(address indexed account, Role role);
-
     address[] private regulators;
     mapping(address => bool) private isRegulator;
 
@@ -67,51 +64,43 @@ contract ProduceRegistry {
         );
         _;
     }
+
     modifier onlyFarmer() {
-    require(roleRegistry.hasRole(msg.sender, IRoleRegistry.Role.FARMER), "Caller is not a farmer");
-    _;
-}
-
-   
-
-    constructor(address _roleRegistry) {
-    owner = msg.sender;
-    roleRegistry = IRoleRegistry(_roleRegistry);
-}
-
-
-
-    // --- Setup functions (called once after all three contracts are deployed) ---
-
-    function setComplianceRegistry(address newComplianceRegistry) external onlyOwner {
-         require(newComplianceRegistry != address(0) , "Zero address not allowed");
-         complianceRegistry = newComplianceRegistry;
-         emit ComplianceRegistryUpdated(newComplianceRegistry);
+        require(
+            roleRegistry.hasRole(msg.sender, IRoleRegistry.Role.FARMER),
+            "Caller is not a farmer"
+        );
+        _;
     }
 
-    function setSupplyChainLedger(address newSupplyChainLedger) external onlyOwner {
-       require(newSupplyChainLedger != address(0) , "Zero address not allowed");
+    constructor(address _roleRegistry) {
+        owner = msg.sender;
+        roleRegistry = IRoleRegistry(_roleRegistry);
+    }
+
+    function setComplianceRegistry(
+        address newComplianceRegistry
+    ) external onlyOwner {
+        require(
+            newComplianceRegistry != address(0),
+            "Zero address not allowed"
+        );
+        complianceRegistry = newComplianceRegistry;
+        emit ComplianceRegistryUpdated(newComplianceRegistry);
+    }
+
+    function setSupplyChainLedger(
+        address newSupplyChainLedger
+    ) external onlyOwner {
+        require(newSupplyChainLedger != address(0), "Zero address not allowed");
         supplyChainLedger = newSupplyChainLedger;
-       emit SupplyChainLedgerUpdated(newSupplyChainLedger);
+        emit SupplyChainLedgerUpdated(newSupplyChainLedger);
     }
 
     function addRegulator(address account) external onlyOwner {
         isRegulator[account] = true;
         regulators.push(account);
     }
-
-
-function hasRole(address account, Role role) external view returns (bool) {
-        return roles[account] == role;
-    }
-
-    function assignRole(address account, Role role) external onlyOwner {
-        require(account != address(0), "Zero address not allowed");
-        roles[account] = role;
-        emit RoleAssigned(account, role);
-    }
-
-    // --- Core functions ---
 
     function registerBatch(
         string calldata batchId,
@@ -120,7 +109,7 @@ function hasRole(address account, Role role) external view returns (bool) {
         string calldata seedVariety,
         bool isGMOFree,
         string calldata farmId
-    ) external {
+    ) external onlyFarmer {
         require(!batchExists[batchId], "Batch already exists");
 
         batches[batchId] = Batch({
@@ -141,26 +130,32 @@ function hasRole(address account, Role role) external view returns (bool) {
         emit BatchRegistered(batchId, farmId, msg.sender, block.timestamp);
     }
 
-    function getBatch(string calldata batchId) external view returns (Batch memory) {
+    function getBatch(
+        string calldata batchId
+    ) external view returns (Batch memory) {
         require(batchExists[batchId], "Batch not found");
         return batches[batchId];
     }
 
-    function getBatchesByFarm(string calldata farmId) external view returns (string[] memory) {
+    function getBatchesByFarm(
+        string calldata farmId
+    ) external view returns (string[] memory) {
         return farmBatches[farmId];
     }
 
-    // Only callable by ComplianceRegistry or SupplyChainLedger, not by end users directly
-    function updateBatchStatus(string calldata batchId, BatchStatus newStatus)
-        external
-        onlySiblingContracts
-    {
+    function updateBatchStatus(
+        string calldata batchId,
+        BatchStatus newStatus
+    ) external onlySiblingContracts {
         require(batchExists[batchId], "Batch not found");
         batches[batchId].status = newStatus;
         emit BatchStatusChanged(batchId, newStatus);
     }
 
-    function flagBatch(string calldata batchId, string calldata reason) external onlyRegulator {
+    function flagBatch(
+        string calldata batchId,
+        string calldata reason
+    ) external onlyRegulator {
         require(batchExists[batchId], "Batch not found");
         batches[batchId].status = BatchStatus.FLAGGED;
         emit BatchFlagged(batchId, reason);

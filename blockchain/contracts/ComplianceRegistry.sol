@@ -10,7 +10,10 @@ interface IProduceRegistry {
         FLAGGED
     }
 
-    function updateBatchStatus(string calldata batchId, BatchStatus newStatus) external;
+    function updateBatchStatus(
+        string calldata batchId,
+        BatchStatus newStatus
+    ) external;
 }
 
 contract ComplianceRegistry {
@@ -45,11 +48,11 @@ contract ComplianceRegistry {
         address issuedBy;
     }
 
-    address public immutable owner;
-    IProduceRegistry public  immutable produceRegistry;
+    address public immutable regulator;
+    address public owner;
+    IProduceRegistry public produceRegistry;
 
-    mapping(address => bool) private inspectors;
-    mapping(address => bool) private regulators;
+    mapping(address => bool) public approvedInspectors;
 
     mapping(string => Inspection) private inspections;
     mapping(string => bool) private inspectionExists;
@@ -73,35 +76,40 @@ contract ComplianceRegistry {
         uint256 issuedAt
     );
     event CertificateRevoked(string certId, string batchId, string reason);
-
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Not contract owner");
-        _;
-    }
+    event InspectorAdded(address indexed inspector);
+    event InspectorRemoved(address indexed inspector);
 
     modifier onlyInspector() {
-        require(inspectors[msg.sender], "Not an inspector");
+        require(approvedInspectors[msg.sender], "Not an inspector");
         _;
     }
 
     modifier onlyRegulator() {
-        require(regulators[msg.sender], "Not a regulator");
+        require(msg.sender == regulator, "Not a regulator");
         _;
     }
 
-    constructor(address _produceRegistry) {
+    constructor(address _produceRegistry, address _regulator) {
+        require(_regulator != address(0), "Zero address not allowed");
         owner = msg.sender;
         produceRegistry = IProduceRegistry(_produceRegistry);
+        regulator = _regulator;
     }
 
     // --- Setup functions ---
 
-    function addInspector(address account) external onlyOwner {
-        inspectors[account] = true;
+    function addInspector(address inspector) external onlyRegulator {
+        approvedInspectors[inspector] = true;
+        emit InspectorAdded(inspector);
     }
 
-    function addRegulator(address account) external onlyOwner {
-        regulators[account] = true;
+    function removeInspector(address inspector) external onlyRegulator {
+        approvedInspectors[inspector] = false;
+        emit InspectorRemoved(inspector);
+    }
+
+    function isApprovedInspector(address wallet) external view returns (bool) {
+        return approvedInspectors[wallet];
     }
 
     // --- Core functions ---
@@ -132,7 +140,10 @@ contract ComplianceRegistry {
 
         emit InspectionRecorded(batchId, inspectorId, gmoStatus, grade);
 
-        produceRegistry.updateBatchStatus(batchId, IProduceRegistry.BatchStatus.INSPECTED);
+        produceRegistry.updateBatchStatus(
+            batchId,
+            IProduceRegistry.BatchStatus.INSPECTED
+        );
     }
 
     function issueCertificate(
@@ -161,19 +172,26 @@ contract ComplianceRegistry {
         emit CertificateIssued(certId, batchId, msg.sender, block.timestamp);
     }
 
-    function getCertificate(string calldata batchId) external view returns (Certificate memory) {
+    function getCertificate(
+        string calldata batchId
+    ) external view returns (Certificate memory) {
         require(certificateExists[batchId], "Certificate not found");
         return certificates[batchId];
     }
 
-    function getInspection(string calldata batchId) external view returns (Inspection memory) {
+    function getInspection(
+        string calldata batchId
+    ) external view returns (Inspection memory) {
         require(inspectionExists[batchId], "Inspection not found");
         return inspections[batchId];
     }
 
     // NOTE: the doc specifies revokeCertificate(batchId, reason) directly,
     // which is used here since certificates are keyed by batchId.
-    function revokeCertificate(string calldata batchId, string calldata reason) external onlyRegulator {
+    function revokeCertificate(
+        string calldata batchId,
+        string calldata reason
+    ) external onlyRegulator {
         require(certificateExists[batchId], "Certificate not found");
         Certificate storage cert = certificates[batchId];
         cert.isActive = false;
