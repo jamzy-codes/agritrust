@@ -2,33 +2,21 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
 import type { ProduceRegistry, ComplianceRegistry } from "../typechain-types";
-import { RoleRegistry } from '../typechain-types/RoleRegistry';
 
 
 describe("ComplianceRegistry", function () {
   let produceRegistry: ProduceRegistry;
   let complianceRegistry: ComplianceRegistry;
   let owner: any, inspector: any, regulator: any, farmer: any, randomUser: any;
-  let roleRegistry: RoleRegistry;
 
   const batchId = "AGT-0001";
   const farmId = "FARM-001";
-  const FARMER_ROLE = 1;
 
   beforeEach(async function () {
     [owner, inspector, regulator, farmer, randomUser] = await ethers.getSigners();
 
-    const RoleRegistryFactory = await ethers.getContractFactory("RoleRegistry");
-    roleRegistry = (await RoleRegistryFactory.deploy()) as unknown as RoleRegistry;
-    await roleRegistry.waitForDeployment();
-
-
-    await roleRegistry.connect(owner).assignRole(farmer.address, FARMER_ROLE);
-
-     const ProduceRegistryFactory = await ethers.getContractFactory("ProduceRegistry");
-    produceRegistry = (await ProduceRegistryFactory.deploy(
-      await roleRegistry.getAddress()
-    )) as unknown as ProduceRegistry;
+    const ProduceRegistryFactory = await ethers.getContractFactory("ProduceRegistry");
+    produceRegistry = (await ProduceRegistryFactory.deploy()) as unknown as ProduceRegistry;
     await produceRegistry.waitForDeployment();
 
     const ComplianceRegistryFactory = await ethers.getContractFactory("ComplianceRegistry");

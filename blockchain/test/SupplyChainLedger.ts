@@ -7,7 +7,6 @@ describe("SupplyChainLedger", function () {
   let produceRegistry: ProduceRegistry;
   let supplyChainLedger: SupplyChainLedger;
   let owner: any, farmer: any, distributor: any, retailer: any, regulator: any, randomUser: any;
-  let roleRegistry: any;
 
   const FARMER_ROLE = 1;
   const DISTRIBUTOR_ROLE = 2;
@@ -18,25 +17,14 @@ describe("SupplyChainLedger", function () {
   beforeEach(async function () {
     [owner, farmer, distributor, retailer, regulator, randomUser] = await ethers.getSigners();
 
-    const RoleRegistryFactory = await ethers.getContractFactory("RoleRegistry");
-    roleRegistry = await RoleRegistryFactory.deploy();
-    await roleRegistry.waitForDeployment();
-
-    await roleRegistry.connect(owner).assignRole(farmer.address, FARMER_ROLE);
-    await roleRegistry.connect(owner).assignRole(distributor.address, DISTRIBUTOR_ROLE);
-    await roleRegistry.connect(owner).assignRole(retailer.address, DISTRIBUTOR_ROLE);
-    await roleRegistry.connect(owner).assignRole(regulator.address, REGULATOR_ROLE);
-
     const ProduceRegistryFactory = await ethers.getContractFactory("ProduceRegistry");
-    produceRegistry = (await ProduceRegistryFactory.deploy(
-      await roleRegistry.getAddress()
-    )) as unknown as ProduceRegistry;
+    produceRegistry = (await ProduceRegistryFactory.deploy()) as unknown as ProduceRegistry;
     await produceRegistry.waitForDeployment();
 
     const SupplyChainLedgerFactory = await ethers.getContractFactory("SupplyChainLedger");
     supplyChainLedger = (await SupplyChainLedgerFactory.deploy(
       await produceRegistry.getAddress(),
-      await roleRegistry.getAddress()
+      regulator.address
     )) as unknown as SupplyChainLedger;
     await supplyChainLedger.waitForDeployment();
 

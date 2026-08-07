@@ -49,9 +49,7 @@ contract ComplianceRegistry {
     }
 
     address public immutable regulator;
-    address public owner;
-    IProduceRegistry public produceRegistry;
-
+    IProduceRegistry public immutable produceRegistry;
     mapping(address => bool) public approvedInspectors;
 
     mapping(string => Inspection) private inspections;
@@ -91,7 +89,6 @@ contract ComplianceRegistry {
 
     constructor(address _produceRegistry, address _regulator) {
         require(_regulator != address(0), "Zero address not allowed");
-        owner = msg.sender;
         produceRegistry = IProduceRegistry(_produceRegistry);
         regulator = _regulator;
     }

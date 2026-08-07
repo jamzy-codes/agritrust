@@ -1,30 +1,20 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
-import type { ProduceRegistry, RoleRegistry } from "../typechain-types";
+import type { ProduceRegistry } from "../typechain-types";
 
 describe("ProduceRegistry", function () {
   let produceRegistry: ProduceRegistry;
-  let roleRegistry: RoleRegistry;
   let owner: any, complianceStandIn: any, regulator: any, farmer: any;
 
   const batchId = "AGT-0001";
   const farmId = "FARM-001";
-  const FARMER_ROLE = 1;
 
   beforeEach(async function () {
     [owner, complianceStandIn, regulator, farmer] = await ethers.getSigners();
 
-    const RoleRegistryFactory = await ethers.getContractFactory("RoleRegistry");
-    roleRegistry = (await RoleRegistryFactory.deploy()) as unknown as RoleRegistry;
-    await roleRegistry.waitForDeployment();
-
-  await roleRegistry.connect(owner).assignRole(farmer.address, FARMER_ROLE);
-
     const ProduceRegistryFactory = await ethers.getContractFactory("ProduceRegistry");
-    produceRegistry = (await ProduceRegistryFactory.deploy(
-      await roleRegistry.getAddress()
-    )) as unknown as ProduceRegistry;
+    produceRegistry = (await ProduceRegistryFactory.deploy()) as unknown as ProduceRegistry;
     await produceRegistry.waitForDeployment();
 
     // For these tests we don't have real ComplianceRegistry/SupplyChainLedger contracts,

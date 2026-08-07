@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import "./interfaces/IRoleRegistry.sol";
-
 interface IProduceRegistry {
     enum BatchStatus {
         REGISTERED,
@@ -32,9 +30,8 @@ contract SupplyChainLedger {
         uint256 timestamp;
     }
 
-    address public immutable owner;
+    address public immutable regulator;
     IProduceRegistry public immutable produceRegistry;
-    IRoleRegistry public immutable roleRegistry;
 
     mapping(address => bool) public approvedDistributors;
     mapping(string => Handoff[]) private handoffHistory;
@@ -51,16 +48,8 @@ contract SupplyChainLedger {
     event DistributorAdded(address indexed distributor);
     event DistributorRemoved(address indexed distributor);
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Not contract owner");
-        _;
-    }
-
-    modifier onlyRole(IRoleRegistry.Role required) {
-        require(
-            roleRegistry.hasRole(msg.sender, required),
-            "Caller does not have required role"
-        );
+    modifier onlyRegulator() {
+        require(msg.sender == regulator, "Not a Regulator");
         _;
     }
 
@@ -69,30 +58,21 @@ contract SupplyChainLedger {
             approvedDistributors[msg.sender],
             "Not an approved distributor"
         );
-        require(
-            roleRegistry.hasRole(msg.sender, IRoleRegistry.Role.DISTRIBUTOR),
-            "Caller does not have required role"
-        );
         _;
     }
 
-    constructor(address _produceRegistry, address _roleRegistry) {
-        owner = msg.sender;
+    constructor(address _produceRegistry, address _regulator) {
+        require(_regulator != address(0), "Zero address not allowed");
         produceRegistry = IProduceRegistry(_produceRegistry);
-        roleRegistry = IRoleRegistry(_roleRegistry);
+        regulator = _regulator;
     }
 
-    function addDistributor(
-        address distributor
-    ) external onlyRole(IRoleRegistry.Role.REGULATOR) {
-        require(distributor != address(0), "Zero address not allowed");
+    function addDistributor(address distributor) external onlyRegulator {
         approvedDistributors[distributor] = true;
         emit DistributorAdded(distributor);
     }
 
-    function removeDistributor(
-        address distributor
-    ) external onlyRole(IRoleRegistry.Role.REGULATOR) {
+    function removeDistributor(address distributor) external onlyRegulator {
         approvedDistributors[distributor] = false;
         emit DistributorRemoved(distributor);
     }

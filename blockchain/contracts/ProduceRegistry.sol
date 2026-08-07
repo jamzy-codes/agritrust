@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import "./interfaces/IRoleRegistry.sol";
-
 contract ProduceRegistry {
     enum BatchStatus {
         REGISTERED,
@@ -25,7 +23,6 @@ contract ProduceRegistry {
     }
 
     address public immutable owner;
-    IRoleRegistry public immutable roleRegistry;
 
     address public complianceRegistry;
     address public supplyChainLedger;
@@ -46,7 +43,6 @@ contract ProduceRegistry {
     event BatchFlagged(string batchId, string reason);
     event ComplianceRegistryUpdated(address indexed newRegistry);
     event SupplyChainLedgerUpdated(address indexed newLedger);
-
     modifier onlyOwner() {
         require(msg.sender == owner, "Not contract owner");
         _;
@@ -65,18 +61,11 @@ contract ProduceRegistry {
         _;
     }
 
-    modifier onlyFarmer() {
-        require(
-            roleRegistry.hasRole(msg.sender, IRoleRegistry.Role.FARMER),
-            "Caller is not a farmer"
-        );
-        _;
-    }
+    constructor() {
+    owner = msg.sender;
+}
 
-    constructor(address _roleRegistry) {
-        owner = msg.sender;
-        roleRegistry = IRoleRegistry(_roleRegistry);
-    }
+    // --- Setup functions (called once after all three contracts are deployed) ---
 
     function setComplianceRegistry(
         address newComplianceRegistry
@@ -109,8 +98,8 @@ contract ProduceRegistry {
         string calldata seedVariety,
         bool isGMOFree,
         string calldata farmId
-    ) external onlyFarmer {
-        require(!batchExists[batchId], "Batch already exists");
+    ) external {
+    require(!batchExists[batchId], "Batch already exists");
 
         batches[batchId] = Batch({
             batchId: batchId,
