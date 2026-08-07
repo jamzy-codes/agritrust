@@ -10,7 +10,10 @@ interface IProduceRegistry {
         FLAGGED
     }
 
-    function updateBatchStatus(string calldata batchId, BatchStatus newStatus) external;
+    function updateBatchStatus(
+        string calldata batchId,
+        BatchStatus newStatus
+    ) external;
 }
 
 contract ComplianceRegistry {
@@ -47,10 +50,6 @@ contract ComplianceRegistry {
 
     address public immutable regulator;
     IProduceRegistry public immutable produceRegistry;
-
-
-
-
     mapping(address => bool) public approvedInspectors;
 
     mapping(string => Inspection) private inspections;
@@ -75,10 +74,8 @@ contract ComplianceRegistry {
         uint256 issuedAt
     );
     event CertificateRevoked(string certId, string batchId, string reason);
-    event InspectorAdded(address indexed  inspector);
+    event InspectorAdded(address indexed inspector);
     event InspectorRemoved(address indexed inspector);
-
-   
 
     modifier onlyInspector() {
         require(approvedInspectors[msg.sender], "Not an inspector");
@@ -90,11 +87,12 @@ contract ComplianceRegistry {
         _;
     }
 
-   constructor(address _produceRegistry, address _regulator) {
-    require(_regulator != address(0), "Zero address not allowed");
-    produceRegistry = IProduceRegistry(_produceRegistry);
-    regulator = _regulator;
-}
+    constructor(address _produceRegistry, address _regulator) {
+        require(_regulator != address(0), "Zero address not allowed");
+        produceRegistry = IProduceRegistry(_produceRegistry);
+        regulator = _regulator;
+    }
+
     // --- Setup functions ---
 
     function addInspector(address inspector) external onlyRegulator {
@@ -102,15 +100,14 @@ contract ComplianceRegistry {
         emit InspectorAdded(inspector);
     }
 
+    function removeInspector(address inspector) external onlyRegulator {
+        approvedInspectors[inspector] = false;
+        emit InspectorRemoved(inspector);
+    }
 
-   function removeInspector (address inspector) external onlyRegulator{
-    approvedInspectors[inspector] = false;
-    emit InspectorRemoved(inspector);
-   }
-  function isApprovedInspector(address wallet) external view  returns (bool) {
-    return approvedInspectors[wallet];
-  }
- 
+    function isApprovedInspector(address wallet) external view returns (bool) {
+        return approvedInspectors[wallet];
+    }
 
     // --- Core functions ---
 
@@ -140,7 +137,10 @@ contract ComplianceRegistry {
 
         emit InspectionRecorded(batchId, inspectorId, gmoStatus, grade);
 
-        produceRegistry.updateBatchStatus(batchId, IProduceRegistry.BatchStatus.INSPECTED);
+        produceRegistry.updateBatchStatus(
+            batchId,
+            IProduceRegistry.BatchStatus.INSPECTED
+        );
     }
 
     function issueCertificate(
@@ -169,19 +169,26 @@ contract ComplianceRegistry {
         emit CertificateIssued(certId, batchId, msg.sender, block.timestamp);
     }
 
-    function getCertificate(string calldata batchId) external view returns (Certificate memory) {
+    function getCertificate(
+        string calldata batchId
+    ) external view returns (Certificate memory) {
         require(certificateExists[batchId], "Certificate not found");
         return certificates[batchId];
     }
 
-    function getInspection(string calldata batchId) external view returns (Inspection memory) {
+    function getInspection(
+        string calldata batchId
+    ) external view returns (Inspection memory) {
         require(inspectionExists[batchId], "Inspection not found");
         return inspections[batchId];
     }
 
     // NOTE: the doc specifies revokeCertificate(batchId, reason) directly,
     // which is used here since certificates are keyed by batchId.
-    function revokeCertificate(string calldata batchId, string calldata reason) external onlyRegulator {
+    function revokeCertificate(
+        string calldata batchId,
+        string calldata reason
+    ) external onlyRegulator {
         require(certificateExists[batchId], "Certificate not found");
         Certificate storage cert = certificates[batchId];
         cert.isActive = false;

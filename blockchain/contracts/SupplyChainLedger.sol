@@ -10,7 +10,10 @@ interface IProduceRegistry {
         FLAGGED
     }
 
-    function updateBatchStatus(string calldata batchId, BatchStatus newStatus) external;
+    function updateBatchStatus(
+        string calldata batchId,
+        BatchStatus newStatus
+    ) external;
 }
 
 contract SupplyChainLedger {
@@ -28,10 +31,9 @@ contract SupplyChainLedger {
     }
 
     address public immutable regulator;
-    IProduceRegistry public immutable  produceRegistry;
+    IProduceRegistry public immutable produceRegistry;
 
-    mapping (address => bool) public approvedDistributors;
-
+    mapping(address => bool) public approvedDistributors;
     mapping(string => Handoff[]) private handoffHistory;
     mapping(string => address) private currentCustodian;
     mapping(string => bool) private batchStarted;
@@ -44,38 +46,42 @@ contract SupplyChainLedger {
     );
     event BatchDelivered(string batchId, string location, uint256 timestamp);
     event DistributorAdded(address indexed distributor);
-    event DistributorRemoved(address indexed  distributor);
+    event DistributorRemoved(address indexed distributor);
 
-     modifier onlyRegulator() {
-         require(msg.sender == regulator, "Not a Regulator");
-         _;
-     }
-
-     modifier onlyDistributor(){
-        require(approvedDistributors[msg.sender] , "Not an approved distributor");
+    modifier onlyRegulator() {
+        require(msg.sender == regulator, "Not a Regulator");
         _;
-     }
+    }
 
-    constructor(address _produceRegistry , address _regulator) {
+    modifier onlyDistributor() {
+        require(
+            approvedDistributors[msg.sender],
+            "Not an approved distributor"
+        );
+        _;
+    }
+
+    constructor(address _produceRegistry, address _regulator) {
         require(_regulator != address(0), "Zero address not allowed");
         produceRegistry = IProduceRegistry(_produceRegistry);
         regulator = _regulator;
     }
 
-    function addDistributor(address distributor) external onlyRegulator{
+    function addDistributor(address distributor) external onlyRegulator {
         approvedDistributors[distributor] = true;
         emit DistributorAdded(distributor);
     }
 
+    function removeDistributor(address distributor) external onlyRegulator {
+        approvedDistributors[distributor] = false;
+        emit DistributorRemoved(distributor);
+    }
 
-   function removeDistributor(address distributor) external onlyRegulator {
-      approvedDistributors[distributor] = false;
-      emit DistributorRemoved(distributor);
-   }
-   
-  function isApprovedDistributor(address wallet) external view returns (bool){
-     return approvedDistributors[wallet];
-  }
+    function isApprovedDistributor(
+        address wallet
+    ) external view returns (bool) {
+        return approvedDistributors[wallet];
+    }
 
     function recordHandoff(
         string calldata batchId,
@@ -86,7 +92,9 @@ contract SupplyChainLedger {
         string calldata transportMethod,
         uint256 quantityKg
     ) external onlyDistributor {
-        address fromWallet = batchStarted[batchId] ? currentCustodian[batchId] : msg.sender;
+        address fromWallet = batchStarted[batchId]
+            ? currentCustodian[batchId]
+            : msg.sender;
 
         handoffHistory[batchId].push(
             Handoff({
@@ -108,20 +116,32 @@ contract SupplyChainLedger {
 
         emit HandoffRecorded(batchId, fromParty, toParty, block.timestamp);
 
-        produceRegistry.updateBatchStatus(batchId, IProduceRegistry.BatchStatus.IN_TRANSIT);
+        produceRegistry.updateBatchStatus(
+            batchId,
+            IProduceRegistry.BatchStatus.IN_TRANSIT
+        );
     }
 
-    function recordDelivery(string calldata batchId, string calldata location) external onlyDistributor {
+    function recordDelivery(
+        string calldata batchId,
+        string calldata location
+    ) external onlyDistributor {
         emit BatchDelivered(batchId, location, block.timestamp);
-
-        produceRegistry.updateBatchStatus(batchId, IProduceRegistry.BatchStatus.DELIVERED);
+        produceRegistry.updateBatchStatus(
+            batchId,
+            IProduceRegistry.BatchStatus.DELIVERED
+        );
     }
 
-    function getHandoffHistory(string calldata batchId) external view returns (Handoff[] memory) {
+    function getHandoffHistory(
+        string calldata batchId
+    ) external view returns (Handoff[] memory) {
         return handoffHistory[batchId];
     }
 
-    function getCurrentCustodian(string calldata batchId) external view returns (address) {
+    function getCurrentCustodian(
+        string calldata batchId
+    ) external view returns (address) {
         return currentCustodian[batchId];
     }
 }

@@ -8,6 +8,9 @@ describe("SupplyChainLedger", function () {
   let supplyChainLedger: SupplyChainLedger;
   let owner: any, farmer: any, distributor: any, retailer: any, regulator: any, randomUser: any;
 
+  const FARMER_ROLE = 1;
+  const DISTRIBUTOR_ROLE = 2;
+  const REGULATOR_ROLE = 4;
   const batchId = "AGT-0001";
   const farmId = "FARM-001";
 
