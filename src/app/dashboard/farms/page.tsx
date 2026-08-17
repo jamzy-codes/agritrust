@@ -2,23 +2,88 @@
 
 import Link from "next/link";
 import { Camera, Sprout } from "lucide-react";
+import { useEffect, useState } from "react";
 
+import { supabase } from "@/lib/supabase";
 import type { UserRole } from "@/types";
 
-const MOCK_ROLE: UserRole = "FARMER";
-
-const farmCards = [
-  { name: "Okafor Family Farm", region: "Rivers", compliance: "99.1%" },
-  { name: "Sunrise Agro Ltd", region: "Oyo", compliance: "87.0%" },
-  { name: "GreenFields Farms", region: "Kaduna", compliance: "78.4%" },
-  { name: "Ife Agri Cooperative", region: "Edo", compliance: "91.2%" },
-  { name: "Niger Delta Rice Farms", region: "Rivers", compliance: "94.5%" },
-  { name: "Northern Grains Co-op", region: "Kano", compliance: "96.8%" },
-];
+interface Farm {
+  id: string;
+  owner_id: string;
+  farm_name: string;
+  location: string;
+  gps_coordinates?: string | null;
+  nasc_registration?: string | null;
+  primary_crops?: string[] | null;
+  farm_photo_url?: string | null;
+  created_at?: string;
+}
 
 export default function FarmsPage() {
+  const [role, setRole] = useState<UserRole>("FARMER");
+  const [farmerFarm, setFarmerFarm] = useState<Farm | null>(null);
+  const [allFarms, setAllFarms] = useState<Farm[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadData() {
+      const { data: userData, error: userError } =
+        await supabase.auth.getUser();
+      if (userError || !userData.user) {
+        setIsLoading(false);
+        return;
+      }
+
+      const userId = userData.user.id;
+
+      // Get user role
+      const { data: userProfile, error: profileError } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", userId)
+        .single();
+
+      if (profileError || !userProfile?.role) {
+        setIsLoading(false);
+        return;
+      }
+
+      const userRole = userProfile.role as UserRole;
+      setRole(userRole);
+
+      if (userRole === "REGULATOR" || userRole === "INSPECTOR") {
+        const { data: farmsData } = await supabase
+          .from("farms")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        setAllFarms(farmsData || []);
+      } else {
+        const { data: farmData } = await supabase
+          .from("farms")
+          .select("*")
+          .eq("owner_id", userId)
+          .maybeSingle();
+
+        setFarmerFarm(farmData || null);
+      }
+
+      setIsLoading(false);
+    }
+
+    loadData();
+  }, []);
+
   const isRegulatorOrInspector =
-    MOCK_ROLE === "REGULATOR" || MOCK_ROLE === "INSPECTOR";
+    role === "REGULATOR" || role === "INSPECTOR";
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[400px] items-center justify-center p-8">
+        <p className="text-sm text-agri-muted">Loading farm profile...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="pb-10">
@@ -37,47 +102,48 @@ export default function FarmsPage() {
       </header>
 
       {isRegulatorOrInspector ? (
-        <div className="mx-8 grid grid-cols-3 gap-4">
-          {farmCards.map((farm) => {
-            const isAmber = farm.compliance === "78.4%";
-
-            return (
+        allFarms.length > 0 ? (
+          <div className="mx-8 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {allFarms.map((farm) => (
               <div
-                key={farm.name}
+                key={farm.id}
                 className="rounded-xl border border-agri-border bg-agri-surface p-5"
               >
                 <div className="relative mb-4 h-24 overflow-hidden rounded-xl border border-agri-border bg-gradient-to-br from-accent-green/20 to-agri-raised">
                   <div className="flex h-full items-center justify-center">
                     <Sprout className="h-10 w-10 text-accent-green/40" />
                   </div>
-                  <div className="absolute bottom-3 left-3 flex items-center gap-2 rounded-lg bg-agri-base/80 px-3 py-1.5 backdrop-blur-sm">
-                    <Camera className="h-3.5 w-3.5 text-agri-muted" />
-                    <p className="text-xs text-agri-muted">Add farm photo</p>
-                  </div>
                 </div>
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent-green/20">
                     <Sprout className="h-5 w-5 text-accent-green" />
                   </div>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-bold ${
-                      isAmber
-                        ? "bg-accent-amber/20 text-accent-amber"
-                        : "bg-accent-green/20 text-accent-green"
-                    }`}
-                  >
-                    {farm.compliance}
+                  <span className="rounded-full bg-accent-green/20 px-2 py-0.5 text-xs font-bold text-accent-green">
+                    REGISTERED
                   </span>
                 </div>
                 <h2 className="mt-4 text-lg font-bold text-agri-text">
-                  {farm.name}
+                  {farm.farm_name}
                 </h2>
-                <p className="mt-1 text-sm text-agri-muted">{farm.region}</p>
+                <p className="mt-1 text-sm text-agri-muted">{farm.location}</p>
+                {farm.nasc_registration ? (
+                  <p className="mt-1 font-mono text-xs text-agri-muted">
+                    NASC: {farm.nasc_registration}
+                  </p>
+                ) : null}
               </div>
-            );
-          })}
-        </div>
-      ) : (
+            ))}
+          </div>
+        ) : (
+          <div className="mx-8 rounded-xl border border-agri-border bg-agri-surface p-8 text-center">
+            <Sprout className="mx-auto mb-3 h-10 w-10 text-agri-muted" />
+            <h2 className="text-lg font-bold text-agri-text">No Farms Registered</h2>
+            <p className="mt-1 text-sm text-agri-muted">
+              There are currently no registered farms in the network database.
+            </p>
+          </div>
+        )
+      ) : farmerFarm ? (
         <div className="mx-8 rounded-xl border border-agri-border bg-agri-surface p-6">
           <div className="relative mb-5 h-40 overflow-hidden rounded-xl border border-agri-border bg-gradient-to-br from-accent-green/20 to-agri-raised">
             <div className="flex h-full items-center justify-center">
@@ -95,48 +161,66 @@ export default function FarmsPage() {
             </div>
             <div>
               <h2 className="text-xl font-bold text-agri-text">
-                Okafor Family Farm
+                {farmerFarm.farm_name}
               </h2>
               <p className="text-sm text-agri-muted">
-                Rivers State, Nigeria · NASC-NG-04821
+                {farmerFarm.location}
+                {farmerFarm.nasc_registration ? ` · ${farmerFarm.nasc_registration}` : ""}
               </p>
+              {farmerFarm.gps_coordinates ? (
+                <p className="mt-0.5 font-mono text-xs text-accent-cyan">
+                  GPS: {farmerFarm.gps_coordinates}
+                </p>
+              ) : null}
             </div>
           </div>
 
           <div className="mt-6 flex gap-4">
             <div className="rounded-lg border border-agri-border bg-agri-raised px-4 py-3">
-              <p className="text-lg font-bold text-agri-text">14</p>
-              <p className="text-sm text-agri-muted">
-                Total batches registered
-              </p>
+              <p className="text-lg font-bold text-agri-text">Active</p>
+              <p className="text-sm text-agri-muted">Farm status</p>
             </div>
             <div className="rounded-lg border border-agri-border bg-agri-raised px-4 py-3">
-              <p className="text-lg font-bold text-agri-text">92.8%</p>
-              <p className="text-sm text-agri-muted">Compliance rate</p>
-            </div>
-            <div className="rounded-lg border border-agri-border bg-agri-raised px-4 py-3">
-              <p className="text-lg font-bold text-agri-text">6,240 kg</p>
-              <p className="text-sm text-agri-muted">Total produce traced</p>
+              <p className="text-lg font-bold text-accent-green">Verified</p>
+              <p className="text-sm text-agri-muted">On-chain profile</p>
             </div>
           </div>
 
-          <div className="mt-6">
-            <p className="mb-2 text-sm text-agri-muted">Primary crops</p>
-            <div className="flex gap-2">
-              <span className="rounded-full bg-accent-green/20 px-3 py-1 text-xs text-accent-green">
-                Cocoa
-              </span>
-              <span className="rounded-full bg-accent-green/20 px-3 py-1 text-xs text-accent-green">
-                Cassava
-              </span>
+          {farmerFarm.primary_crops && farmerFarm.primary_crops.length > 0 ? (
+            <div className="mt-6">
+              <p className="mb-2 text-sm text-agri-muted">Primary crops</p>
+              <div className="flex flex-wrap gap-2">
+                {farmerFarm.primary_crops.map((crop) => (
+                  <span
+                    key={crop}
+                    className="rounded-full bg-accent-green/20 px-3 py-1 text-xs text-accent-green"
+                  >
+                    {crop}
+                  </span>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : null}
 
           <Link
             href="/dashboard/settings"
             className="mt-6 block text-sm text-accent-blue"
           >
             Manage Farm Profile →
+          </Link>
+        </div>
+      ) : (
+        <div className="mx-8 rounded-xl border border-agri-border bg-agri-surface p-8 text-center">
+          <Sprout className="mx-auto mb-3 h-10 w-10 text-agri-muted" />
+          <h2 className="text-lg font-bold text-agri-text">No Farm Profile Found</h2>
+          <p className="mt-1 text-sm text-agri-muted">
+            You haven&apos;t completed your farm registration yet.
+          </p>
+          <Link
+            href="/dashboard/settings"
+            className="mt-4 inline-block rounded-lg bg-accent-green px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-accent-green/90"
+          >
+            Set Up Farm Profile
           </Link>
         </div>
       )}

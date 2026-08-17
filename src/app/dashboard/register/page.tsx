@@ -1,11 +1,15 @@
 "use client";
 
+import { useConnectModal } from "@rainbow-me/rainbowkit";
 import {
   AlertTriangle,
   ArrowLeftRight,
   ArrowRight,
+  CheckCircle2,
+  ExternalLink,
   Leaf,
   Link as LinkIcon,
+  Loader2,
   MapPin,
   Plus,
   QrCode,
@@ -14,10 +18,18 @@ import {
   Sprout,
   TestTube,
   Truck,
+  Wallet,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useAccount, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 
+import {
+  complianceRegistryContract,
+  produceRegistryContract,
+  supplyChainLedgerContract,
+} from "@/lib/contracts";
 import { PRIMARY_BATCH, TX_HASHES } from "@/lib/mockData";
+import { supabase } from "@/lib/supabase";
 import type { UserRole } from "@/types";
 
 type ActiveTab = "new" | "verify" | "handoff";
@@ -99,7 +111,15 @@ function SectionIntro({
   );
 }
 
-function SearchRow({ buttonColor }: { buttonColor: string }) {
+function SearchRow({
+  buttonColor,
+  value,
+  onChange,
+}: {
+  buttonColor: string;
+  value: string;
+  onChange: (val: string) => void;
+}) {
   return (
     <div className="mb-6 flex gap-3 px-8">
       <div className="relative flex-1">
@@ -107,6 +127,8 @@ function SearchRow({ buttonColor }: { buttonColor: string }) {
         <input
           className={`${fieldClassName} pl-9`}
           placeholder="Enter batch ID or scan QR code..."
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
         />
       </div>
       <button
@@ -126,8 +148,10 @@ function SearchRow({ buttonColor }: { buttonColor: string }) {
 }
 
 function LoadedBatchCard({
+  batchId,
   status,
 }: {
+  batchId: string;
   status: "AWAITING INSPECTION" | "CERTIFIED";
 }) {
   return (
@@ -137,7 +161,7 @@ function LoadedBatchCard({
       </div>
       <div className="flex-1">
         <p className="font-mono font-bold text-agri-text">
-          {PRIMARY_BATCH.batchId}
+          {batchId || PRIMARY_BATCH.batchId}
         </p>
         <p className="text-sm text-agri-muted">
           {PRIMARY_BATCH.cropType} · {PRIMARY_BATCH.quantityKg} kg
@@ -164,6 +188,10 @@ function LoadedBatchCard({
 
 function NewBatchTab() {
   const today = new Date().toISOString().split("T")[0];
+  const { isConnected } = useAccount();
+  const { openConnectModal } = useConnectModal();
+  const { writeContractAsync } = useWriteContract();
+
   const [form, setForm] = useState<NewBatchForm>({
     cropType: "",
     grade: "",
@@ -177,16 +205,140 @@ function NewBatchTab() {
     registrationDate: today,
   });
   const [currentStep, setCurrentStep] = useState<number>(1);
-  const [submissionMessage, setSubmissionMessage] = useState<string>("");
+  const [userFarm, setUserFarm] = useState<{ id: string; farm_name: string } | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [batchId] = useState<string>(
+    () => `AGT-${Math.floor(1000 + Math.random() * 9000)}`
+  );
+
+  const [statusStage, setStatusStage] = useState<
+    "idle" | "wallet_pending" | "confirming_onchain" | "success" | "error"
+  >("idle");
+  const [errorMessage, setErrorMessage] = useState<string>("");
+  const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
+
+  const { isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash: txHash });
+
+  useEffect(() => {
+    async function loadUserFarm() {
+      const { data: userData, error: userError } =
+        await supabase.auth.getUser();
+      if (!userError && userData.user) {
+        setUserId(userData.user.id);
+        const { data: farm } = await supabase
+          .from("farms")
+          .select("*")
+          .eq("owner_id", userData.user.id)
+          .maybeSingle();
+
+        if (farm) {
+          setUserFarm({ id: farm.id, farm_name: farm.farm_name });
+          setForm((prev) => ({
+            ...prev,
+            farmName: prev.farmName || farm.farm_name || "",
+            farmLocation: prev.farmLocation || farm.location || "",
+            gpsCoordinates:
+              prev.gpsCoordinates && prev.gpsCoordinates !== "6.5244, 3.3792"
+                ? prev.gpsCoordinates
+                : farm.gps_coordinates || "6.5244, 3.3792",
+          }));
+        }
+      }
+    }
+    loadUserFarm();
+  }, []);
+
+  useEffect(() => {
+    if (isConfirmed && txHash && statusStage === "confirming_onchain") {
+      async function saveToSupabase() {
+        try {
+          const { error: dbError } = await supabase.from("batches").insert({
+            batch_id: batchId,
+            farm_id: userFarm?.id || null,
+            registered_by: userId,
+            crop_type: form.cropType,
+            quantity_kg: parseFloat(form.quantityKg || "0"),
+            seed_variety: form.seedVariety || null,
+            is_gmo_free: form.isGMOFree,
+            gmo_status: "farmer_declared",
+            status: "REGISTERED",
+            tx_hash: txHash,
+            registered_at: new Date().toISOString(),
+          });
+
+          if (dbError) {
+            console.error("Supabase insert error:", dbError);
+            setErrorMessage(`Blockchain confirmed, but database insert failed: ${dbError.message}`);
+            setStatusStage("error");
+          } else {
+            setStatusStage("success");
+          }
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          setErrorMessage(`Database write failed: ${message}`);
+          setStatusStage("error");
+        }
+      }
+      saveToSupabase();
+    }
+  }, [isConfirmed, txHash, statusStage, batchId, userFarm?.id, userId, form]);
 
   function updateField<K extends keyof NewBatchForm>(
     field: K,
-    value: NewBatchForm[K],
+    value: NewBatchForm[K]
   ) {
     setForm((current) => ({ ...current, [field]: value }));
   }
 
+  async function handleRegisterBatch() {
+    if (!isConnected) {
+      openConnectModal?.();
+      return;
+    }
+
+    if (!form.cropType || !form.quantityKg) {
+      setErrorMessage("Please fill in required fields (Crop type and Quantity).");
+      setStatusStage("error");
+      return;
+    }
+
+    setErrorMessage("");
+    setStatusStage("wallet_pending");
+
+    try {
+      const quantityVal = BigInt(Math.round(parseFloat(form.quantityKg || "0")));
+      const farmIdVal = userFarm?.id || userFarm?.farm_name || "FARM-001";
+
+      const hash = await writeContractAsync({
+        address: produceRegistryContract.address,
+        abi: produceRegistryContract.abi,
+        functionName: "registerBatch",
+        args: [
+          batchId,
+          form.cropType,
+          quantityVal,
+          form.seedVariety || "Standard",
+          form.isGMOFree,
+          farmIdVal,
+        ],
+      });
+
+      setTxHash(hash);
+      setStatusStage("confirming_onchain");
+    } catch (err: unknown) {
+      console.error("Contract call error:", err);
+      const message = err instanceof Error ? err.message : String(err);
+      setStatusStage("error");
+      if (message.includes("User rejected") || message.includes("user rejected")) {
+        setErrorMessage("Transaction was rejected in your wallet.");
+      } else {
+        setErrorMessage(`Transaction failed: ${message}`);
+      }
+    }
+  }
+
   const previewRows = [
+    ["Batch ID", batchId],
     ["Crop Type", form.cropType],
     ["Grade", form.grade],
     ["Quantity", form.quantityKg ? `${form.quantityKg} kg` : ""],
@@ -233,7 +385,11 @@ function NewBatchTab() {
                         {index + 1}
                       </div>
                       <span
-                        className={`mt-1 text-xs ${isActive || isComplete ? "text-accent-green" : "text-agri-muted"}`}
+                        className={`mt-1 text-xs ${
+                          isActive || isComplete
+                            ? "text-accent-green"
+                            : "text-agri-muted"
+                        }`}
                       >
                         {label}
                       </span>
@@ -243,7 +399,7 @@ function NewBatchTab() {
                     ) : null}
                   </div>
                 );
-              },
+              }
             )}
           </div>
 
@@ -333,7 +489,11 @@ function NewBatchTab() {
                     GMO-free declaration
                   </span>
                   <span
-                    className={`rounded-full px-3 py-1 text-xs font-bold ${form.isGMOFree ? "bg-accent-green/20 text-accent-green" : "bg-accent-red/20 text-accent-red"}`}
+                    className={`rounded-full px-3 py-1 text-xs font-bold ${
+                      form.isGMOFree
+                        ? "bg-accent-green/20 text-accent-green"
+                        : "bg-accent-red/20 text-accent-red"
+                    }`}
                   >
                     {form.isGMOFree ? "✓ GMO-FREE" : "GMO PRESENT"}
                   </span>
@@ -355,7 +515,7 @@ function NewBatchTab() {
                 </label>
 
                 <button
-                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-accent-green py-2.5 font-medium text-white hover:shadow-[0_0_15px_rgba(34,197,94,0.4)] transition-shadow duration-300"
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-accent-green py-2.5 font-medium text-white transition-shadow duration-300 hover:shadow-[0_0_15px_rgba(34,197,94,0.4)]"
                   type="button"
                   onClick={() => setCurrentStep(2)}
                 >
@@ -432,7 +592,7 @@ function NewBatchTab() {
                     Back
                   </button>
                   <button
-                    className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-accent-green py-2.5 font-medium text-white hover:shadow-[0_0_15px_rgba(34,197,94,0.4)] transition-shadow duration-300"
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-accent-green py-2.5 font-medium text-white transition-shadow duration-300 hover:shadow-[0_0_15px_rgba(34,197,94,0.4)]"
                     type="button"
                     onClick={() => setCurrentStep(3)}
                   >
@@ -451,6 +611,7 @@ function NewBatchTab() {
                   </h3>
                   <div className="mt-3 space-y-2">
                     {[
+                      ["Generated Batch ID", batchId],
                       ["Crop Type", form.cropType],
                       ["Grade/Quality", form.grade],
                       [
@@ -481,33 +642,79 @@ function NewBatchTab() {
                   </div>
                 </div>
 
-                {submissionMessage ? (
-                  <div className="rounded-lg border border-accent-green/30 bg-accent-green/10 p-3 text-sm text-accent-green">
-                    {submissionMessage}
+                {statusStage === "success" && txHash ? (
+                  <div className="rounded-lg border border-accent-green/30 bg-accent-green/10 p-4 text-sm text-accent-green space-y-2">
+                    <div className="flex items-center gap-2 font-bold">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Batch Registered Successfully!
+                    </div>
+                    <p className="text-xs text-agri-muted">
+                      Batch ID: <span className="font-mono text-agri-text">{batchId}</span>
+                    </p>
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <span>Transaction Hash:</span>
+                      <a
+                        href={`https://amoy.polygonscan.com/tx/${txHash}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-mono underline hover:text-accent-green flex items-center gap-1"
+                      >
+                        {txHash.slice(0, 10)}...{txHash.slice(-8)}
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
                   </div>
                 ) : null}
 
-                <div className="mt-2 flex gap-3">
+                {statusStage === "error" && errorMessage ? (
+                  <div className="rounded-lg border border-accent-red/30 bg-accent-red/10 p-3 text-sm text-accent-red flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                    <span>{errorMessage}</span>
+                  </div>
+                ) : null}
+
+                {!isConnected ? (
                   <button
-                    className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-agri-border bg-agri-raised py-2.5 font-medium text-agri-text"
+                    className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-accent-amber py-2.5 font-medium text-white transition-shadow duration-300 hover:shadow-[0_0_15px_rgba(245,158,11,0.4)]"
                     type="button"
-                    onClick={() => setCurrentStep(2)}
+                    onClick={() => openConnectModal?.()}
                   >
-                    <ArrowLeftRight className="h-4 w-4 rotate-180" />
-                    Back
+                    <Wallet className="h-4 w-4" />
+                    Connect Wallet to Submit
                   </button>
-                  <button
-                    className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-accent-green py-2.5 font-medium text-white hover:shadow-[0_0_15px_rgba(34,197,94,0.4)] transition-shadow duration-300"
-                    type="button"
-                    onClick={() =>
-                      setSubmissionMessage(
-                        "Batch registration submitted successfully.",
-                      )
-                    }
-                  >
-                    Submit Registration
-                  </button>
-                </div>
+                ) : (
+                  <div className="mt-2 flex gap-3">
+                    <button
+                      className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-agri-border bg-agri-raised py-2.5 font-medium text-agri-text"
+                      type="button"
+                      disabled={statusStage === "wallet_pending" || statusStage === "confirming_onchain"}
+                      onClick={() => setCurrentStep(2)}
+                    >
+                      <ArrowLeftRight className="h-4 w-4 rotate-180" />
+                      Back
+                    </button>
+                    <button
+                      className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-accent-green py-2.5 font-medium text-white transition-shadow duration-300 hover:shadow-[0_0_15px_rgba(34,197,94,0.4)] disabled:opacity-50"
+                      type="button"
+                      disabled={statusStage === "wallet_pending" || statusStage === "confirming_onchain" || statusStage === "success"}
+                      onClick={handleRegisterBatch}
+                    >
+                      {statusStage === "wallet_pending" ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Confirm in wallet...
+                        </>
+                      ) : statusStage === "confirming_onchain" ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Confirming transaction...
+                        </>
+                      ) : (
+                        "Submit Registration"
+                      )}
+                    </button>
+                  </div>
+                )}
               </>
             ) : null}
           </div>
@@ -543,18 +750,191 @@ function NewBatchTab() {
 }
 
 function VerifyBatchTab() {
+  const { isConnected } = useAccount();
+  const { openConnectModal } = useConnectModal();
+  const { writeContractAsync } = useWriteContract();
+
+  const [searchBatchId, setSearchBatchId] = useState<string>("AGT-0042");
+  const [weightKg, setWeightKg] = useState<string>("498.5");
+  const [qualityGrade, setQualityGrade] = useState<string>("Grade A - Premium");
+  const [storageCondition, setStorageCondition] = useState<string>("Optimal");
   const [gmoResult, setGmoResult] = useState<GMOResult>("NON_GMO");
-  const [submissionStatus, setSubmissionStatus] = useState<
-    "idle" | "submitting" | "success"
+  const [biosafetyGrade, setBiosafetyGrade] = useState<string>("A+");
+  const [meetsNAFDAC, setMeetsNAFDAC] = useState<boolean>(true);
+  const [notes, setNotes] = useState<string>("");
+  const [inspectorId, setInspectorId] = useState<string>("NAFDAC-0042");
+  const [userId, setUserId] = useState<string | null>(null);
+
+  const [statusStage, setStatusStage] = useState<
+    | "idle"
+    | "wallet_pending_insp"
+    | "confirming_insp"
+    | "wallet_pending_cert"
+    | "confirming_cert"
+    | "success"
+    | "error"
   >("idle");
+  const [errorMessage, setErrorMessage] = useState<string>("");
+  const [inspTxHash, setInspTxHash] = useState<`0x${string}` | undefined>();
+  const [certTxHash, setCertTxHash] = useState<`0x${string}` | undefined>();
 
-  function handleSubmitInspection() {
-    setSubmissionStatus("submitting");
+  // Track confirmation for inspection transaction
+  const { isSuccess: isInspConfirmed } = useWaitForTransactionReceipt({ hash: inspTxHash });
+  // Track confirmation for certificate transaction
+  const { isSuccess: isCertConfirmed } = useWaitForTransactionReceipt({ hash: certTxHash });
 
-    window.setTimeout(() => {
-      setSubmissionStatus("success");
-    }, 1500);
+  useEffect(() => {
+    async function loadUser() {
+      const { data: userData, error: userError } =
+        await supabase.auth.getUser();
+      if (!userError && userData.user) {
+        setUserId(userData.user.id);
+      }
+    }
+    loadUser();
+  }, []);
+
+  // Step 2: Trigger issueCertificate automatically after recordInspection is confirmed on-chain
+  useEffect(() => {
+    if (isInspConfirmed && inspTxHash && statusStage === "confirming_insp") {
+      async function triggerIssueCertificate() {
+        setStatusStage("wallet_pending_cert");
+        try {
+          const certIdVal = `CERT-${searchBatchId}-${Math.floor(1000 + Math.random() * 9000)}`;
+          const validFromVal = BigInt(Math.floor(Date.now() / 1000));
+          const validUntilVal = validFromVal + BigInt(31536000); // 1 year validity (365 days)
+
+          const hash = await writeContractAsync({
+            address: complianceRegistryContract.address,
+            abi: complianceRegistryContract.abi,
+            functionName: "issueCertificate",
+            args: [searchBatchId, certIdVal, validFromVal, validUntilVal],
+          });
+
+          setCertTxHash(hash);
+          setStatusStage("confirming_cert");
+        } catch (err: unknown) {
+          console.error("Certificate issuance error:", err);
+          const message = err instanceof Error ? err.message : String(err);
+          setStatusStage("error");
+          if (message.includes("User rejected") || message.includes("user rejected")) {
+            setErrorMessage("Inspection was recorded, but certificate issuance was rejected in your wallet.");
+          } else {
+            setErrorMessage(`Inspection was recorded, but certificate issuance failed: ${message}`);
+          }
+        }
+      }
+      triggerIssueCertificate();
+    }
+  }, [isInspConfirmed, inspTxHash, statusStage, searchBatchId, writeContractAsync]);
+
+  // Step 3: Insert into Supabase only after BOTH recordInspection AND issueCertificate are confirmed
+  useEffect(() => {
+    if (isCertConfirmed && certTxHash && statusStage === "confirming_cert") {
+      async function recordInspectionSuccess() {
+        try {
+          const combinedTxHash = certTxHash || inspTxHash;
+
+          const { error: inspError } = await supabase
+            .from("inspections")
+            .insert({
+              batch_id: searchBatchId,
+              inspector_id: userId,
+              weight_kg: parseFloat(weightKg || "0"),
+              quality_grade: qualityGrade,
+              gmo_test_result: gmoResult,
+              certificate_issued: true,
+              tx_hash: combinedTxHash,
+              inspected_at: new Date().toISOString(),
+            });
+
+          if (inspError) {
+            console.error("Inspections table insert error:", inspError);
+          }
+
+          const { error: batchError } = await supabase
+            .from("batches")
+            .update({
+              gmo_status: "inspector_verified",
+              status: "INSPECTED",
+            })
+            .eq("batch_id", searchBatchId);
+
+          if (batchError) {
+            console.error("Batches table update error:", batchError);
+          }
+
+          setStatusStage("success");
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          setErrorMessage(`Database update failed: ${message}`);
+          setStatusStage("error");
+        }
+      }
+      recordInspectionSuccess();
+    }
+  }, [isCertConfirmed, certTxHash, inspTxHash, statusStage, searchBatchId, userId, weightKg, qualityGrade, gmoResult]);
+
+  async function handleSubmitInspection() {
+    if (!isConnected) {
+      openConnectModal?.();
+      return;
+    }
+
+    setErrorMessage("");
+    setStatusStage("wallet_pending_insp");
+
+    try {
+      const gmoStatusVal = gmoResult === "NON_GMO" ? 1 : 2;
+      const weightVal = BigInt(Math.round(parseFloat(weightKg || "0")));
+
+      const hash = await writeContractAsync({
+        address: complianceRegistryContract.address,
+        abi: complianceRegistryContract.abi,
+        functionName: "recordInspection",
+        args: [
+          searchBatchId,
+          inspectorId,
+          weightVal,
+          qualityGrade,
+          gmoStatusVal,
+          biosafetyGrade,
+          meetsNAFDAC,
+          notes,
+        ],
+      });
+
+      setInspTxHash(hash);
+      setStatusStage("confirming_insp");
+    } catch (err: unknown) {
+      console.error("Inspection error:", err);
+      const message = err instanceof Error ? err.message : String(err);
+      setStatusStage("error");
+
+      if (
+        message.includes("Not an inspector") ||
+        message.includes("onlyInspector") ||
+        message.includes("not approved")
+      ) {
+        setErrorMessage(
+          "Your wallet is not yet approved as an Inspector. Contact your Regulator."
+        );
+      } else if (
+        message.includes("User rejected") ||
+        message.includes("user rejected")
+      ) {
+        setErrorMessage("Transaction was rejected in your wallet.");
+      } else {
+        setErrorMessage(`Inspection submission failed: ${message}`);
+      }
+    }
   }
+
+  const isProcessing =
+    statusStage === "wallet_pending_insp" ||
+    statusStage === "confirming_insp" ||
+    statusStage === "wallet_pending_cert" ||
+    statusStage === "confirming_cert";
 
   return (
     <>
@@ -565,8 +945,12 @@ function VerifyBatchTab() {
         copy="Load a registered batch and issue an immutable biosafety inspection record."
         color="text-accent-blue"
       />
-      <SearchRow buttonColor="bg-accent-blue" />
-      <LoadedBatchCard status="AWAITING INSPECTION" />
+      <SearchRow
+        buttonColor="bg-accent-blue"
+        value={searchBatchId}
+        onChange={setSearchBatchId}
+      />
+      <LoadedBatchCard batchId={searchBatchId} status="AWAITING INSPECTION" />
 
       <section className="grid grid-cols-1 gap-6 px-8 xl:grid-cols-[1fr_340px]">
         <div className="flex flex-col gap-4 rounded-xl glass p-6">
@@ -577,14 +961,19 @@ function VerifyBatchTab() {
             <input
               className={fieldClassName}
               type="number"
-              defaultValue="498.5"
+              value={weightKg}
+              onChange={(e) => setWeightKg(e.target.value)}
             />
           </label>
           <label>
             <span className="mb-1 block text-sm text-agri-muted">
               Quality assessment
             </span>
-            <select className={fieldClassName} defaultValue="Grade A - Premium">
+            <select
+              className={fieldClassName}
+              value={qualityGrade}
+              onChange={(e) => setQualityGrade(e.target.value)}
+            >
               <option>Grade A - Premium</option>
               <option>Grade A</option>
               <option>Grade B</option>
@@ -595,7 +984,11 @@ function VerifyBatchTab() {
             <span className="mb-1 block text-sm text-agri-muted">
               Storage condition
             </span>
-            <select className={fieldClassName} defaultValue="Optimal">
+            <select
+              className={fieldClassName}
+              value={storageCondition}
+              onChange={(e) => setStorageCondition(e.target.value)}
+            >
               <option>Optimal</option>
               <option>Good</option>
               <option>Fair</option>
@@ -637,7 +1030,11 @@ function VerifyBatchTab() {
             <span className="mb-1 block text-sm text-agri-muted">
               Biosafety grade
             </span>
-            <select className={fieldClassName} defaultValue="A+">
+            <select
+              className={fieldClassName}
+              value={biosafetyGrade}
+              onChange={(e) => setBiosafetyGrade(e.target.value)}
+            >
               <option>A+</option>
               <option>A</option>
               <option>B+</option>
@@ -647,11 +1044,12 @@ function VerifyBatchTab() {
             </select>
           </label>
 
-          <label className="flex items-center gap-3 text-sm text-agri-text">
+          <label className="flex items-center gap-3 text-sm text-agri-text cursor-pointer">
             <input
               className="h-4 w-4 accent-accent-blue"
               type="checkbox"
-              defaultChecked
+              checked={meetsNAFDAC}
+              onChange={(e) => setMeetsNAFDAC(e.target.checked)}
             />
             Meets NAFDAC standards
           </label>
@@ -664,6 +1062,8 @@ function VerifyBatchTab() {
               className={fieldClassName}
               rows={3}
               placeholder="Add inspection notes..."
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
             />
           </label>
 
@@ -673,30 +1073,106 @@ function VerifyBatchTab() {
             </span>
             <input
               className={`${fieldClassName} font-mono`}
-              defaultValue="NAFDAC-0042"
+              value={inspectorId}
+              onChange={(e) => setInspectorId(e.target.value)}
             />
           </label>
 
-          {submissionStatus === "success" ? (
-            <div className="rounded-lg border border-accent-green/30 bg-accent-green/10 p-3 text-sm font-medium text-accent-green">
-              ✓ Inspection submitted successfully
+          {statusStage === "success" && (certTxHash || inspTxHash) ? (
+            <div className="rounded-lg border border-accent-green/30 bg-accent-green/10 p-4 text-sm text-accent-green space-y-2">
+              <div className="flex items-center gap-2 font-bold">
+                <CheckCircle2 className="h-4 w-4" />
+                Inspection & Biosafety Certificate Issued Successfully!
+              </div>
+              <div className="flex flex-col gap-1 text-xs">
+                {inspTxHash ? (
+                  <div className="flex items-center gap-1.5">
+                    <span>Inspection Tx:</span>
+                    <a
+                      href={`https://amoy.polygonscan.com/tx/${inspTxHash}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-mono underline hover:text-accent-green flex items-center gap-1"
+                    >
+                      {inspTxHash.slice(0, 10)}...{inspTxHash.slice(-8)}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                ) : null}
+                {certTxHash ? (
+                  <div className="flex items-center gap-1.5">
+                    <span>Certificate Tx:</span>
+                    <a
+                      href={`https://amoy.polygonscan.com/tx/${certTxHash}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-mono underline hover:text-accent-green flex items-center gap-1"
+                    >
+                      {certTxHash.slice(0, 10)}...{certTxHash.slice(-8)}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                ) : null}
+              </div>
             </div>
           ) : null}
-          <button
-            className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-accent-blue py-3 font-semibold text-white hover:shadow-[0_0_15px_rgba(59,130,246,0.4)] transition-shadow duration-300"
-            type="button"
-            onClick={handleSubmitInspection}
-            disabled={submissionStatus === "submitting"}
-          >
-            <LinkIcon className="h-4 w-4" />
-            {submissionStatus === "submitting"
-              ? "Submitting..."
-              : "Submit Inspection to Blockchain"}
-          </button>
+
+          {statusStage === "error" && errorMessage ? (
+            <div className="rounded-lg border border-accent-red/30 bg-accent-red/10 p-3 text-sm text-accent-red flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+          ) : null}
+
+          {!isConnected ? (
+            <button
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-accent-amber py-3 font-semibold text-white transition-shadow duration-300 hover:shadow-[0_0_15px_rgba(245,158,11,0.4)]"
+              type="button"
+              onClick={() => openConnectModal?.()}
+            >
+              <Wallet className="h-4 w-4" />
+              Connect Wallet to Submit
+            </button>
+          ) : (
+            <button
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-accent-blue py-3 font-semibold text-white transition-shadow duration-300 hover:shadow-[0_0_15px_rgba(59,130,246,0.4)] disabled:opacity-50"
+              type="button"
+              onClick={handleSubmitInspection}
+              disabled={isProcessing || statusStage === "success"}
+            >
+              {statusStage === "wallet_pending_insp" ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Confirm inspection in wallet... (1/2)
+                </>
+              ) : statusStage === "confirming_insp" ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Confirming inspection on-chain... (1/2)
+                </>
+              ) : statusStage === "wallet_pending_cert" ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Confirm certificate issuance in wallet... (2/2)
+                </>
+              ) : statusStage === "confirming_cert" ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Confirming certificate on-chain... (2/2)
+                </>
+              ) : (
+                <>
+                  <LinkIcon className="h-4 w-4" />
+                  Submit Inspection & Issue Certificate
+                </>
+              )}
+            </button>
+          )}
+
           <div className="mt-3 flex items-center gap-2">
             <AlertTriangle className="h-3.5 w-3.5 text-accent-amber" />
             <p className="text-xs text-agri-muted">
-              This action is permanent and cannot be reversed.
+              This action requires 2 wallet confirmations (Inspection + Certificate).
             </p>
           </div>
         </div>
@@ -733,20 +1209,159 @@ function VerifyBatchTab() {
 }
 
 function HandoffTab() {
+  const { isConnected } = useAccount();
+  const { openConnectModal } = useConnectModal();
+  const { writeContractAsync } = useWriteContract();
+
+  const [searchBatchId, setSearchBatchId] = useState<string>("AGT-0042");
   const [handoffType, setHandoffType] = useState<HandoffType>(
-    "Warehouse to Distributor",
+    "Warehouse to Distributor"
   );
-  const [submissionStatus, setSubmissionStatus] = useState<
-    "idle" | "submitting" | "success"
+  const [fromParty, setFromParty] = useState<string>("Warehouse");
+  const [receivingPartyName, setReceivingPartyName] = useState<string>("PH Agri Logistics Ltd");
+  const [receivingPartyId, setReceivingPartyId] = useState<string>("DIST-0091");
+  const [handoffLocation, setHandoffLocation] = useState<string>("Port Harcourt Wharf");
+  const [quantityTransferred, setQuantityTransferred] = useState<string>("498.5");
+  const [condition, setCondition] = useState<string>("Good condition");
+  const [transportMethod, setTransportMethod] = useState<string>("Refrigerated truck");
+  const [expectedDeliveryDate, setExpectedDeliveryDate] = useState<string>("");
+  const [userId, setUserId] = useState<string | null>(null);
+
+  const [statusStage, setStatusStage] = useState<
+    "idle" | "wallet_pending" | "confirming_onchain" | "success" | "error"
   >("idle");
+  const [errorMessage, setErrorMessage] = useState<string>("");
+  const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
 
-  function handleRecordHandoff() {
-    setSubmissionStatus("submitting");
+  const { isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash: txHash });
 
-    window.setTimeout(() => {
-      setSubmissionStatus("success");
-    }, 1500);
+  useEffect(() => {
+    async function loadUser() {
+      const { data: userData, error: userError } =
+        await supabase.auth.getUser();
+      if (!userError && userData.user) {
+        setUserId(userData.user.id);
+      }
+    }
+    loadUser();
+  }, []);
+
+  useEffect(() => {
+    if (isConfirmed && txHash && statusStage === "confirming_onchain") {
+      async function recordHandoffSuccess() {
+        try {
+          const { error: handoffErr } = await supabase
+            .from("handoffs")
+            .insert({
+              batch_id: searchBatchId,
+              distributor_id: userId,
+              from_party: fromParty,
+              to_party: receivingPartyName,
+              location: handoffLocation,
+              condition: condition,
+              transport_method: transportMethod,
+              tx_hash: txHash,
+              handed_off_at: new Date().toISOString(),
+            });
+
+          if (handoffErr) {
+            console.error("Handoffs table insert error:", handoffErr);
+          }
+
+          const targetStatus =
+            handoffType === "Distributor to Market" ? "DELIVERED" : "IN_TRANSIT";
+
+          const { error: batchErr } = await supabase
+            .from("batches")
+            .update({ status: targetStatus })
+            .eq("batch_id", searchBatchId);
+
+          if (batchErr) {
+            console.error("Batches table update error:", batchErr);
+          }
+
+          setStatusStage("success");
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          setErrorMessage(`Database update failed: ${message}`);
+          setStatusStage("error");
+        }
+      }
+      recordHandoffSuccess();
+    }
+  }, [isConfirmed, txHash, statusStage, searchBatchId, userId, fromParty, receivingPartyName, handoffLocation, condition, transportMethod, handoffType]);
+
+  async function handleRecordHandoff() {
+    if (!isConnected) {
+      openConnectModal?.();
+      return;
+    }
+
+    setErrorMessage("");
+    setStatusStage("wallet_pending");
+
+    try {
+      const isFinalDelivery = handoffType === "Distributor to Market";
+      let hash: `0x${string}`;
+
+      if (isFinalDelivery) {
+        // Call recordDelivery(batchId, location) on supplyChainLedgerContract for final delivery
+        hash = await writeContractAsync({
+          address: supplyChainLedgerContract.address,
+          abi: supplyChainLedgerContract.abi,
+          functionName: "recordDelivery",
+          args: [
+            searchBatchId,
+            handoffLocation || "Location",
+          ],
+        });
+      } else {
+        // Call recordHandoff(batchId, fromParty, toParty, location, condition, transportMethod, quantityKg) for in-transit handoff
+        const quantityVal = BigInt(Math.round(parseFloat(quantityTransferred || "0")));
+
+        hash = await writeContractAsync({
+          address: supplyChainLedgerContract.address,
+          abi: supplyChainLedgerContract.abi,
+          functionName: "recordHandoff",
+          args: [
+            searchBatchId,
+            fromParty || "Warehouse",
+            receivingPartyName || "Distributor",
+            handoffLocation || "Location",
+            condition || "Good condition",
+            transportMethod || "Refrigerated truck",
+            quantityVal,
+          ],
+        });
+      }
+
+      setTxHash(hash);
+      setStatusStage("confirming_onchain");
+    } catch (err: unknown) {
+      console.error("Handoff/Delivery error:", err);
+      const message = err instanceof Error ? err.message : String(err);
+      setStatusStage("error");
+
+      if (
+        message.includes("Not an approved distributor") ||
+        message.includes("onlyDistributor") ||
+        message.includes("not approved")
+      ) {
+        setErrorMessage(
+          "Your wallet is not yet approved as a Distributor. Contact your Regulator."
+        );
+      } else if (
+        message.includes("User rejected") ||
+        message.includes("user rejected")
+      ) {
+        setErrorMessage("Transaction was rejected in your wallet.");
+      } else {
+        setErrorMessage(`Handoff/Delivery recording failed: ${message}`);
+      }
+    }
   }
+
+  const isFinalDelivery = handoffType === "Distributor to Market";
 
   return (
     <>
@@ -757,8 +1372,12 @@ function HandoffTab() {
         copy="Log custody movement so downstream buyers can verify every step."
         color="text-accent-amber"
       />
-      <SearchRow buttonColor="bg-accent-amber" />
-      <LoadedBatchCard status="CERTIFIED" />
+      <SearchRow
+        buttonColor="bg-accent-amber"
+        value={searchBatchId}
+        onChange={setSearchBatchId}
+      />
+      <LoadedBatchCard batchId={searchBatchId} status="CERTIFIED" />
 
       <section className="grid grid-cols-1 gap-6 px-8 xl:grid-cols-[1fr_300px]">
         <div className="flex flex-col gap-4 rounded-xl glass p-6">
@@ -788,95 +1407,190 @@ function HandoffTab() {
             </div>
           </div>
 
+          {!isFinalDelivery ? (
+            <label>
+              <span className="mb-1 block text-sm text-agri-muted">
+                From party
+              </span>
+              <input
+                className={fieldClassName}
+                placeholder="e.g. Warehouse"
+                value={fromParty}
+                onChange={(e) => setFromParty(e.target.value)}
+              />
+            </label>
+          ) : null}
+
+          {!isFinalDelivery ? (
+            <label>
+              <span className="mb-1 block text-sm text-agri-muted">
+                Receiving party name
+              </span>
+              <input
+                className={fieldClassName}
+                placeholder="e.g. PH Agri Logistics Ltd"
+                value={receivingPartyName}
+                onChange={(e) => setReceivingPartyName(e.target.value)}
+              />
+            </label>
+          ) : null}
+
+          {!isFinalDelivery ? (
+            <label>
+              <span className="mb-1 block text-sm text-agri-muted">
+                Receiving party ID
+              </span>
+              <input
+                className={`${fieldClassName} font-mono`}
+                placeholder="e.g. DIST-0091"
+                value={receivingPartyId}
+                onChange={(e) => setReceivingPartyId(e.target.value)}
+              />
+            </label>
+          ) : null}
+
           <label>
             <span className="mb-1 block text-sm text-agri-muted">
-              Receiving party name
-            </span>
-            <input
-              className={fieldClassName}
-              placeholder="e.g. PH Agri Logistics Ltd"
-            />
-          </label>
-          <label>
-            <span className="mb-1 block text-sm text-agri-muted">
-              Receiving party ID
-            </span>
-            <input
-              className={`${fieldClassName} font-mono`}
-              placeholder="e.g. DIST-0091"
-            />
-          </label>
-          <label>
-            <span className="mb-1 block text-sm text-agri-muted">
-              Handoff location
+              {isFinalDelivery ? "Delivery location" : "Handoff location"}
             </span>
             <div className="relative">
               <input
                 className={`${fieldClassName} pr-10`}
                 placeholder="e.g. Port Harcourt Wharf"
+                value={handoffLocation}
+                onChange={(e) => setHandoffLocation(e.target.value)}
               />
               <MapPin className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-agri-muted" />
             </div>
           </label>
-          <label>
-            <span className="mb-1 block text-sm text-agri-muted">
-              Quantity transferred
-            </span>
-            <input
-              className={fieldClassName}
-              type="number"
-              defaultValue="498.5"
-            />
-          </label>
-          <label>
-            <span className="mb-1 block text-sm text-agri-muted">
-              Condition on handoff
-            </span>
-            <select className={fieldClassName} defaultValue="Good condition">
-              <option>Excellent</option>
-              <option>Good condition</option>
-              <option>Acceptable</option>
-              <option>Damaged</option>
-            </select>
-          </label>
-          <label>
-            <span className="mb-1 block text-sm text-agri-muted">
-              Transport method
-            </span>
-            <select
-              className={fieldClassName}
-              defaultValue="Refrigerated truck"
-            >
-              <option>Refrigerated truck</option>
-              <option>Standard truck</option>
-              <option>Rail</option>
-              <option>Air freight</option>
-              <option>Boat</option>
-            </select>
-          </label>
-          <label>
-            <span className="mb-1 block text-sm text-agri-muted">
-              Expected delivery date
-            </span>
-            <input className={fieldClassName} type="date" />
-          </label>
 
-          {submissionStatus === "success" ? (
-            <div className="rounded-lg border border-accent-green/30 bg-accent-green/10 p-3 text-sm font-medium text-accent-green">
-              ✓ Handoff recorded successfully
+          {!isFinalDelivery ? (
+            <label>
+              <span className="mb-1 block text-sm text-agri-muted">
+                Quantity transferred
+              </span>
+              <input
+                className={fieldClassName}
+                type="number"
+                value={quantityTransferred}
+                onChange={(e) => setQuantityTransferred(e.target.value)}
+              />
+            </label>
+          ) : null}
+
+          {!isFinalDelivery ? (
+            <label>
+              <span className="mb-1 block text-sm text-agri-muted">
+                Condition on handoff
+              </span>
+              <select
+                className={fieldClassName}
+                value={condition}
+                onChange={(e) => setCondition(e.target.value)}
+              >
+                <option>Excellent</option>
+                <option>Good condition</option>
+                <option>Acceptable</option>
+                <option>Damaged</option>
+              </select>
+            </label>
+          ) : null}
+
+          {!isFinalDelivery ? (
+            <label>
+              <span className="mb-1 block text-sm text-agri-muted">
+                Transport method
+              </span>
+              <select
+                className={fieldClassName}
+                value={transportMethod}
+                onChange={(e) => setTransportMethod(e.target.value)}
+              >
+                <option>Refrigerated truck</option>
+                <option>Standard truck</option>
+                <option>Rail</option>
+                <option>Air freight</option>
+                <option>Boat</option>
+              </select>
+            </label>
+          ) : null}
+
+          {!isFinalDelivery ? (
+            <label>
+              <span className="mb-1 block text-sm text-agri-muted">
+                Expected delivery date
+              </span>
+              <input
+                className={fieldClassName}
+                type="date"
+                value={expectedDeliveryDate}
+                onChange={(e) => setExpectedDeliveryDate(e.target.value)}
+              />
+            </label>
+          ) : null}
+
+          {statusStage === "success" && txHash ? (
+            <div className="rounded-lg border border-accent-green/30 bg-accent-green/10 p-4 text-sm text-accent-green space-y-2">
+              <div className="flex items-center gap-2 font-bold">
+                <CheckCircle2 className="h-4 w-4" />
+                {isFinalDelivery ? "Final Delivery Recorded Successfully!" : "Handoff Recorded Successfully!"}
+              </div>
+              <div className="flex items-center gap-1.5 text-xs">
+                <span>Tx Hash:</span>
+                <a
+                  href={`https://amoy.polygonscan.com/tx/${txHash}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-mono underline hover:text-accent-green flex items-center gap-1"
+                >
+                  {txHash.slice(0, 10)}...{txHash.slice(-8)}
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
             </div>
           ) : null}
-          <button
-            className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-accent-amber py-3 font-semibold text-white hover:shadow-[0_0_15px_rgba(245,158,11,0.4)] transition-shadow duration-300"
-            type="button"
-            onClick={handleRecordHandoff}
-            disabled={submissionStatus === "submitting"}
-          >
-            <LinkIcon className="h-4 w-4" />
-            {submissionStatus === "submitting"
-              ? "Submitting..."
-              : "Record Handoff on Blockchain"}
-          </button>
+
+          {statusStage === "error" && errorMessage ? (
+            <div className="rounded-lg border border-accent-red/30 bg-accent-red/10 p-3 text-sm text-accent-red flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+          ) : null}
+
+          {!isConnected ? (
+            <button
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-accent-amber py-3 font-semibold text-white transition-shadow duration-300 hover:shadow-[0_0_15px_rgba(245,158,11,0.4)]"
+              type="button"
+              onClick={() => openConnectModal?.()}
+            >
+              <Wallet className="h-4 w-4" />
+              Connect Wallet to Submit
+            </button>
+          ) : (
+            <button
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-accent-amber py-3 font-semibold text-white transition-shadow duration-300 hover:shadow-[0_0_15px_rgba(245,158,11,0.4)] disabled:opacity-50"
+              type="button"
+              onClick={handleRecordHandoff}
+              disabled={statusStage === "wallet_pending" || statusStage === "confirming_onchain" || statusStage === "success"}
+            >
+              {statusStage === "wallet_pending" ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Confirm in wallet...
+                </>
+              ) : statusStage === "confirming_onchain" ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Confirming transaction...
+                </>
+              ) : (
+                <>
+                  <LinkIcon className="h-4 w-4" />
+                  {isFinalDelivery ? "Record Final Delivery on Blockchain" : "Record Handoff on Blockchain"}
+                </>
+              )}
+            </button>
+          )}
         </div>
 
         <aside className="rounded-xl glass p-5">
@@ -897,7 +1611,7 @@ function HandoffTab() {
               <div className="flex items-center gap-2">
                 <LinkIcon className="h-3 w-3 text-accent-amber" />
                 <p className="font-mono text-[10px] text-accent-amber/70">
-                  {TX_HASHES.inspection.slice(0, 7)}...7c3e
+                  {txHash ? `${txHash.slice(0, 10)}...` : `${TX_HASHES.inspection.slice(0, 7)}...7c3e`}
                 </p>
               </div>
             </div>
@@ -909,11 +1623,33 @@ function HandoffTab() {
 }
 
 export default function RegisterPage() {
-  const MOCK_ROLE: UserRole = "FARMER";
-  const allowedTabIds = roleTabs[MOCK_ROLE];
-  const [activeTab, setActiveTab] = useState<ActiveTab | null>(
-    allowedTabIds[0] ?? null,
-  );
+  const [userRole, setUserRole] = useState<UserRole>("FARMER");
+  const allowedTabIds = roleTabs[userRole] || ["new"];
+  const [activeTab, setActiveTab] = useState<ActiveTab | null>(allowedTabIds[0] ?? "new");
+
+  useEffect(() => {
+    async function loadUserRole() {
+      const { data: userData, error: userError } =
+        await supabase.auth.getUser();
+      if (!userError && userData.user) {
+        const { data: userProfile } = await supabase
+          .from("users")
+          .select("role")
+          .eq("id", userData.user.id)
+          .single();
+
+        if (userProfile?.role) {
+          const role = userProfile.role as UserRole;
+          setUserRole(role);
+          const tabsForRole = roleTabs[role];
+          if (tabsForRole && tabsForRole.length > 0) {
+            setActiveTab(tabsForRole[0]);
+          }
+        }
+      }
+    }
+    loadUserRole();
+  }, []);
 
   const tabs = [
     {

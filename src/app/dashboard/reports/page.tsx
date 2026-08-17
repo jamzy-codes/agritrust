@@ -1,35 +1,58 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Download, FileText } from "lucide-react";
-
-const reports = [
-  {
-    title: "Q2 2026 Compliance Summary",
-    meta: "Generated Jun 28, 2026 · PDF · 2.4 MB",
-  },
-  {
-    title: "Batch Performance — June 2026",
-    meta: "Generated Jun 20, 2026 · CSV · 180 KB",
-  },
-  {
-    title: "Farm Audit — Okafor Family Farm",
-    meta: "Generated Jun 15, 2026 · PDF · 1.1 MB",
-  },
-  {
-    title: "Network Overview — May 2026",
-    meta: "Generated Jun 01, 2026 · PDF · 3.2 MB",
-  },
-  {
-    title: "Q1 2026 Compliance Summary",
-    meta: "Generated Mar 30, 2026 · PDF · 2.1 MB",
-  },
-  {
-    title: "Batch Performance — March 2026",
-    meta: "Generated Mar 20, 2026 · CSV · 165 KB",
-  },
-];
+import { supabase } from "@/lib/supabase";
 
 export default function ReportsPage() {
+  const [farmName, setFarmName] = useState<string>("Okafor Family Farm");
+
+  useEffect(() => {
+    async function loadUserFarm() {
+      const { data: userData, error: userError } =
+        await supabase.auth.getUser();
+      if (!userError && userData.user) {
+        const { data: farm } = await supabase
+          .from("farms")
+          .select("farm_name")
+          .eq("owner_id", userData.user.id)
+          .maybeSingle();
+
+        if (farm?.farm_name) {
+          setFarmName(farm.farm_name);
+        }
+      }
+    }
+    loadUserFarm();
+  }, []);
+
+  const reports = [
+    {
+      title: "Q2 2026 Compliance Summary",
+      meta: "Generated Jun 28, 2026 · PDF · 2.4 MB",
+    },
+    {
+      title: "Batch Performance — June 2026",
+      meta: "Generated Jun 20, 2026 · CSV · 180 KB",
+    },
+    {
+      title: `Farm Audit — ${farmName}`,
+      meta: "Generated Jun 15, 2026 · PDF · 1.1 MB",
+    },
+    {
+      title: "Network Overview — May 2026",
+      meta: "Generated Jun 01, 2026 · PDF · 3.2 MB",
+    },
+    {
+      title: "Q1 2026 Compliance Summary",
+      meta: "Generated Mar 30, 2026 · PDF · 2.1 MB",
+    },
+    {
+      title: "Batch Performance — March 2026",
+      meta: "Generated Mar 20, 2026 · CSV · 165 KB",
+    },
+  ];
+
   return (
     <div className="pb-10">
       <header className="mb-6 px-8 pt-8">

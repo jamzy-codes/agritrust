@@ -1,7 +1,9 @@
 import Link from "next/link";
 import {
+  AlertCircle,
   Copy,
   Download,
+  ExternalLink,
   Globe,
   Info,
   Leaf,
@@ -16,7 +18,7 @@ import {
 } from "lucide-react";
 
 import BrandLogo from "@/components/brand/BrandLogo";
-import { CHAIN_STAGES, PRIMARY_BATCH, TX_HASHES } from "@/lib/mockData";
+import { supabase } from "@/lib/supabase";
 
 function MiniTimeline({
   stages,
@@ -28,7 +30,11 @@ function MiniTimeline({
       {stages.map((stage, index) => (
         <div key={stage.label} className="flex flex-1 flex-col items-center">
           <div
-            className={`flex h-8 w-8 items-center justify-center rounded-full border-2 ${stage.complete ? "border-accent-green bg-accent-green text-white" : "border-agri-border bg-agri-raised text-agri-muted"}`}
+            className={`flex h-8 w-8 items-center justify-center rounded-full border-2 ${
+              stage.complete
+                ? "border-accent-green bg-accent-green text-white"
+                : "border-agri-border bg-agri-raised text-agri-muted"
+            }`}
           >
             <span className="text-[10px] font-bold">{index + 1}</span>
           </div>
@@ -36,7 +42,13 @@ function MiniTimeline({
             <p className="text-[11px] font-semibold text-agri-text">
               {stage.label}
             </p>
-            <p className="text-[10px] text-accent-green">{stage.date}</p>
+            <p
+              className={`text-[10px] ${
+                stage.complete ? "text-accent-green" : "text-agri-muted"
+              }`}
+            >
+              {stage.date}
+            </p>
           </div>
         </div>
       ))}
@@ -50,12 +62,127 @@ export default async function VerifyBatchPage({
   params: Promise<{ batchId: string }>;
 }) {
   const { batchId } = await params;
-  const batch = { ...PRIMARY_BATCH, batchId };
-  const timelineStages = CHAIN_STAGES.map((stage) => ({
-    label: stage.stage,
-    date: stage.date ?? "Jun 14, 2026",
-    complete: true,
-  }));
+
+  // 1. Fetch batch details from Supabase
+  const { data: batch } = await supabase
+    .from("batches")
+    .select("*")
+    .eq("batch_id", batchId)
+    .maybeSingle();
+
+  // If batch not found, render clean error state
+  if (!batch) {
+    return (
+      <div className="min-h-screen bg-agri-base">
+        <header className="flex items-center justify-between border-b border-agri-border px-8 py-4">
+          <Link href="/">
+            <BrandLogo size="sm" />
+          </Link>
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-agri-muted" />
+            <p className="text-sm text-agri-muted">Public Verification Portal</p>
+          </div>
+        </header>
+
+        <section className="flex flex-col items-center justify-center px-8 py-24 text-center">
+          <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full border-4 border-accent-red/30 bg-accent-red/10 text-accent-red">
+            <AlertCircle className="h-10 w-10" />
+          </div>
+          <h1
+            className="mb-2 text-3xl font-bold text-agri-text"
+            style={{ fontFamily: "var(--font-outfit)" }}
+          >
+            Batch Not Found
+          </h1>
+          <p className="max-w-md text-sm text-agri-muted mb-6">
+            No produce batch matching ID <span className="font-mono font-bold text-agri-text">{batchId}</span> was found in the AgriTrust ledger database.
+          </p>
+          <Link
+            href="/"
+            className="rounded-xl bg-accent-blue px-6 py-2.5 text-sm font-semibold text-white transition-all hover:bg-accent-blue/90"
+          >
+            Return to Home
+          </Link>
+        </section>
+      </div>
+    );
+  }
+
+  // 2. Fetch farm details if farm_id exists
+  const { data: farm } = batch.farm_id
+    ? await supabase
+        .from("farms")
+        .select("*")
+        .eq("id", batch.farm_id)
+        .maybeSingle()
+    : { data: null };
+
+  // 3. Fetch inspections for this batch
+  const { data: inspections } = await supabase
+    .from("inspections")
+    .select("*")
+    .eq("batch_id", batchId)
+    .order("inspected_at", { ascending: true });
+
+  // 4. Fetch handoffs for this batch
+  const { data: handoffs } = await supabase
+    .from("handoffs")
+    .select("*")
+    .eq("batch_id", batchId)
+    .order("handed_off_at", { ascending: true });
+
+  const latestInspection = inspections && inspections.length > 0
+    ? inspections[inspections.length - 1]
+    : null;
+
+  const latestHandoff = handoffs && handoffs.length > 0
+    ? handoffs[handoffs.length - 1]
+    : null;
+
+  // Format date helper
+  const formatDate = (dateStr?: string | null) => {
+    if (!dateStr) return "Pending";
+    return new Date(dateStr).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  };
+
+  // Build timeline stages
+  const timelineStages = [
+    {
+      label: "Registration",
+      date: formatDate(batch.registered_at),
+      complete: true,
+    },
+    {
+      label: "Inspection",
+      date: formatDate(latestInspection?.inspected_at),
+      complete: Boolean(latestInspection),
+    },
+    {
+      label: "Handoff / Delivery",
+      date: formatDate(latestHandoff?.handed_off_at),
+      complete: Boolean(latestHandoff),
+    },
+  ];
+
+  // Map GMO Status Labels matching codebase conventions
+  const getGmoLabel = () => {
+    if (batch.gmo_status === "inspector_verified") {
+      return "Non-GMO (Inspector-verified)";
+    }
+    if (batch.gmo_status === "farmer_declared") {
+      return "Non-GMO (Farmer-declared)";
+    }
+    return batch.is_gmo_free ? "Non-GMO Confirmed" : "GMO Present";
+  };
+
+  const farmName = farm?.farm_name || "Registered Farm";
+  const farmLocation = farm?.location || "Nigeria";
+  const registeredDateStr = formatDate(batch.registered_at);
+  const primaryTxHash = latestInspection?.tx_hash || latestHandoff?.tx_hash || batch.tx_hash;
 
   return (
     <div className="min-h-screen bg-agri-base">
@@ -82,14 +209,14 @@ export default async function VerifyBatchPage({
           className="mb-3 text-4xl font-bold text-agri-text"
           style={{ fontFamily: "var(--font-outfit)" }}
         >
-          {batch.cropType}
+          {batch.crop_type}
         </h1>
         <p className="text-agri-muted">
-          Batch {batch.batchId} · {batch.farmName}, {batch.region} · June 2026
+          Batch {batch.batch_id} · {farmName}, {farmLocation} · {registeredDateStr}
         </p>
       </section>
 
-      <section className="mx-auto grid max-w-6xl grid-cols-[1fr_360px] gap-8 px-8 pb-12">
+      <section className="mx-auto grid max-w-6xl grid-cols-1 gap-8 px-8 pb-12 lg:grid-cols-[1fr_360px]">
         <div className="rounded-2xl border border-agri-border bg-agri-surface p-6">
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -99,27 +226,27 @@ export default async function VerifyBatchPage({
               </span>
             </div>
             <span className="font-mono text-sm font-bold text-accent-green">
-              {batch.batchId}
+              {batch.batch_id}
             </span>
           </div>
 
-          <div className="mb-6 grid grid-cols-2 gap-4">
+          <div className="mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
             {[
-              { label: "CROP TYPE", icon: Leaf, value: batch.cropType },
+              { label: "CROP TYPE", icon: Leaf, value: batch.crop_type },
               {
                 label: "FARM ORIGIN",
                 icon: MapPin,
-                value: `${batch.farmName}, ${batch.region}`,
+                value: `${farmName}, ${farmLocation}`,
               },
               {
                 label: "QUANTITY",
                 icon: Scale,
-                value: `${batch.quantityKg} kg`,
+                value: `${batch.quantity_kg} kg`,
               },
               {
                 label: "GMO STATUS",
                 icon: TestTube,
-                value: "NON-GMO CONFIRMED",
+                value: getGmoLabel(),
                 pill: true,
               },
             ].map(({ label, icon: Icon, value, pill }) => (
@@ -130,7 +257,7 @@ export default async function VerifyBatchPage({
                 <div className="flex items-center gap-2">
                   <Icon className="h-4 w-4 text-agri-muted" />
                   {pill ? (
-                    <span className="rounded-full bg-accent-green/20 px-2 py-0.5 text-xs font-bold text-accent-green">
+                    <span className="rounded-full bg-accent-green/20 px-2.5 py-0.5 text-xs font-bold text-accent-green">
                       {value}
                     </span>
                   ) : (
@@ -145,7 +272,9 @@ export default async function VerifyBatchPage({
 
           <div className="my-4 border-t border-agri-border" />
 
-          <p className="mb-4 text-xs text-agri-muted">SUPPLY CHAIN JOURNEY</p>
+          <p className="mb-4 text-xs font-bold tracking-wider uppercase text-agri-muted">
+            SUPPLY CHAIN JOURNEY
+          </p>
           <MiniTimeline stages={timelineStages} />
 
           <div className="my-4 border-t border-agri-border" />
@@ -155,10 +284,12 @@ export default async function VerifyBatchPage({
               <UserCheck className="mt-0.5 h-4 w-4 text-agri-muted" />
               <div>
                 <p className="text-xs uppercase tracking-wide text-agri-muted">
-                  INSPECTOR
+                  INSPECTOR ASSESSMENT
                 </p>
                 <p className="text-sm text-agri-text">
-                  NAFDAC Agent ID 0042 — Certified Jun 17, 2026
+                  {latestInspection
+                    ? `Quality Grade: ${latestInspection.quality_grade || "Certified"} · Inspected ${formatDate(latestInspection.inspected_at)}`
+                    : "Awaiting inspection by certified regulator agent"}
                 </p>
               </div>
             </div>
@@ -166,13 +297,15 @@ export default async function VerifyBatchPage({
               <Star className="mt-0.5 h-4 w-4 text-agri-muted" />
               <div>
                 <p className="text-xs uppercase tracking-wide text-agri-muted">
-                  BIOSAFETY GRADE
+                  BIOSAFETY CERTIFICATE
                 </p>
                 <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-bold text-accent-green">
-                    A+
+                  <span className="text-2xl font-bold text-accent-green">
+                    {latestInspection?.certificate_issued ? "Issued ✓" : "Pending"}
                   </span>
-                  <span className="text-xs text-agri-muted">Excellent</span>
+                  <span className="text-xs text-agri-muted">
+                    {latestInspection?.quality_grade || "Standard Verified"}
+                  </span>
                 </div>
               </div>
             </div>
@@ -182,12 +315,24 @@ export default async function VerifyBatchPage({
                 <p className="text-xs uppercase tracking-wide text-agri-muted">
                   BLOCKCHAIN RECORD
                 </p>
-                <p className="break-all font-mono text-xs text-accent-cyan">
-                  {TX_HASHES.certificate}
-                </p>
-                <Link className="mt-1 block text-xs text-accent-blue" href="#">
-                  Verify on explorer ↗
-                </Link>
+                {primaryTxHash ? (
+                  <>
+                    <p className="break-all font-mono text-xs text-accent-cyan">
+                      {primaryTxHash}
+                    </p>
+                    <a
+                      className="mt-1 inline-flex items-center gap-1 text-xs text-accent-blue hover:underline"
+                      href={`https://amoy.polygonscan.com/tx/${primaryTxHash}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Verify on Polygon Amoy explorer
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </>
+                ) : (
+                  <p className="text-xs text-agri-muted">Pending blockchain transaction receipt</p>
+                )}
               </div>
             </div>
           </div>
@@ -203,12 +348,12 @@ export default async function VerifyBatchPage({
               <div className="absolute bottom-12 left-16 flex flex-col items-center">
                 <MapPin className="h-6 w-6 text-accent-green" />
                 <div className="mt-1 rounded-lg border border-agri-border bg-agri-surface px-2 py-1 text-xs text-agri-text">
-                  Okafor Family Farm
+                  {farmName}
                 </div>
               </div>
             </div>
             <p className="p-3 text-xs text-agri-muted">
-              Farm GPS location, verified on-chain.
+              Farm GPS location ({farm?.gps_coordinates || "Location verified"}), verified on-chain.
             </p>
           </div>
 
@@ -220,7 +365,7 @@ export default async function VerifyBatchPage({
               <QrCode className="h-12 w-12 text-agri-muted" />
             </div>
             <p className="mb-4 text-center text-xs text-agri-muted">
-              Share this link for anyone to verify this produce&apos;s origin.
+              Share this public link for anyone to verify this produce&apos;s origin.
             </p>
             <div className="flex flex-col gap-2">
               <button
@@ -245,8 +390,7 @@ export default async function VerifyBatchPage({
       <div className="flex items-center gap-2 border-t border-agri-border bg-agri-raised px-8 py-4">
         <Info className="h-3.5 w-3.5 text-agri-muted" />
         <p className="text-xs text-agri-muted">
-          Record created Jun 14, 2026 · Last updated Jun 19, 2026 · This record
-          is immutable and permanently stored on the AgriTrust blockchain.
+          Record created {registeredDateStr} · This record is immutable and permanently stored on the AgriTrust blockchain.
         </p>
       </div>
 
