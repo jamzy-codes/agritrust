@@ -15,6 +15,7 @@ import {
   Settings,
   ShieldCheck,
   Sprout,
+  UserCheck,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -61,6 +62,7 @@ const roleStyles: Record<
 
 const navItems: Array<{ icon: LucideIcon; label: string; route: string }> = [
   { icon: LayoutDashboard, label: "Dashboard", route: "/dashboard" },
+  { icon: UserCheck, label: "Approvals", route: "/dashboard/approvals" },
   { icon: Package, label: "Batches", route: "/dashboard/batches" },
   { icon: Sprout, label: "Farms", route: "/dashboard/farms" },
   { icon: Route, label: "Trace", route: "/dashboard/trace" },
@@ -81,6 +83,7 @@ const navItems: Array<{ icon: LucideIcon; label: string; route: string }> = [
 
 const navAccess: Record<string, UserRole[]> = {
   "/dashboard": ["FARMER", "INSPECTOR", "DISTRIBUTOR", "REGULATOR"],
+  "/dashboard/approvals": ["REGULATOR"],
   "/dashboard/batches": ["FARMER", "INSPECTOR", "DISTRIBUTOR", "REGULATOR"],
   "/dashboard/farms": ["FARMER", "INSPECTOR", "REGULATOR"],
   "/dashboard/trace": ["FARMER", "INSPECTOR", "DISTRIBUTOR", "REGULATOR"],

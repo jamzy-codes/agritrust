@@ -11,12 +11,17 @@ import {
   User,
 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-
 
 import BrandLogo from "@/components/brand/BrandLogo";
 import { supabase } from "@/lib/supabase";
+import {
+  fetchRealAlerts,
+  getLastViewedAlertsAt,
+  markAlertsAsViewed,
+  type RealAlert,
+} from "@/lib/alerts";
 import type { UserRole } from "@/types";
 
 interface TopBarProps {
@@ -56,8 +61,53 @@ export default function TopBar({
 }: TopBarProps) {
   const [isAlertsOpen, setIsAlertsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [alerts, setAlerts] = useState<RealAlert[]>([]);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+  const [userId, setUserId] = useState<string | null>(null);
+
   const styles = roleStyles[role];
-  const router = useRouter();   
+  const router = useRouter();
+
+  useEffect(() => {
+    async function loadAlerts() {
+      const { data: userData } = await supabase.auth.getUser();
+      const currentUserId = userData.user?.id || null;
+      setUserId(currentUserId);
+
+      const realAlerts = await fetchRealAlerts(role, currentUserId || undefined);
+      setAlerts(realAlerts);
+
+      if (currentUserId) {
+        const lastViewedAt = await getLastViewedAlertsAt(currentUserId);
+        if (!lastViewedAt) {
+          setUnreadCount(realAlerts.length);
+        } else {
+          const unread = realAlerts.filter(
+            (a) => new Date(a.rawTime).getTime() > new Date(lastViewedAt).getTime(),
+          ).length;
+          setUnreadCount(unread);
+        }
+      } else {
+        setUnreadCount(realAlerts.length);
+      }
+    }
+
+    loadAlerts();
+    const interval = setInterval(loadAlerts, 30000);
+    return () => clearInterval(interval);
+  }, [role]);
+
+  const handleToggleAlerts = async () => {
+    setIsProfileOpen(false);
+    const nextState = !isAlertsOpen;
+    setIsAlertsOpen(nextState);
+
+    if (nextState && userId) {
+      setUnreadCount(0);
+      await markAlertsAsViewed(userId);
+    }
+  };
+
   async function handleLogout() {
     setIsProfileOpen(false);
     await supabase.auth.signOut();
@@ -107,15 +157,17 @@ export default function TopBar({
           <div className="relative">
             <button
               type="button"
-              className="cursor-pointer"
-              onClick={() => {
-                setIsProfileOpen(false);
-                setIsAlertsOpen((current) => !current);
-              }}
+              className="relative cursor-pointer p-1"
+              onClick={handleToggleAlerts}
+              aria-label="Alerts"
             >
               <Bell className="h-5 w-5 text-agri-muted hover:text-agri-text" />
+              {unreadCount > 0 && (
+                <span className="absolute right-0 top-0 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-accent-red px-1 text-[10px] font-bold text-white shadow-sm animate-pulse">
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
             </button>
-            <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-accent-amber" />
 
             {isAlertsOpen && (
               <div
@@ -126,55 +178,59 @@ export default function TopBar({
                   <p className="text-sm font-semibold text-agri-text">
                     Recent Alerts
                   </p>
-                  <span className="text-xs text-agri-muted">3 new</span>
+                  <span className="text-xs text-agri-muted">
+                    {unreadCount > 0 ? `${unreadCount} new` : `${alerts.length} total`}
+                  </span>
                 </div>
 
-                <div className="cursor-pointer px-4 py-3 hover:bg-agri-raised">
-                  <div className="flex items-start gap-3">
-                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent-red" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-agri-text">
-                        Batch AGT-1103 flagged: GMO disclosure missing
-                      </p>
-                      <p className="mt-0.5 text-xs text-agri-muted">
-                        2 hours ago
-                      </p>
-                    </div>
+                {alerts.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-agri-muted">
+                    No active alerts at this time.
                   </div>
-                </div>
+                ) : (
+                  <div className="max-h-72 overflow-y-auto">
+                    {alerts.slice(0, 3).map((alert) => {
+                      const dotColor =
+                        alert.type === "critical"
+                          ? "bg-accent-red"
+                          : alert.type === "warning"
+                            ? "bg-accent-amber"
+                            : "bg-accent-blue";
 
-                <div className="cursor-pointer border-t border-agri-border px-4 py-3 hover:bg-agri-raised">
-                  <div className="flex items-start gap-3">
-                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent-amber" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-agri-text">
-                        Farm ID #0892 inspection overdue
-                      </p>
-                      <p className="mt-0.5 text-xs text-agri-muted">
-                        5 hours ago
-                      </p>
-                    </div>
+                      return (
+                        <Link
+                          key={alert.id}
+                          href={alert.href}
+                          onClick={() => setIsAlertsOpen(false)}
+                          className="block cursor-pointer border-b border-agri-border/50 px-4 py-3 hover:bg-agri-raised last:border-b-0"
+                        >
+                          <div className="flex items-start gap-3">
+                            <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dotColor}`} />
+                            <div className="flex-1">
+                              <p className="text-sm font-medium leading-snug text-agri-text">
+                                {alert.title}
+                              </p>
+                              <p className="mt-0.5 text-xs text-agri-muted">
+                                {alert.description}
+                              </p>
+                              <p className="mt-0.5 text-[10px] text-agri-muted/80">
+                                {alert.time}
+                              </p>
+                            </div>
+                          </div>
+                        </Link>
+                      );
+                    })}
                   </div>
-                </div>
-
-                <div className="cursor-pointer border-t border-agri-border px-4 py-3 hover:bg-agri-raised">
-                  <div className="flex items-start gap-3">
-                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent-amber" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-agri-text">
-                        AGT-0041 awaiting inspection
-                      </p>
-                      <p className="mt-0.5 text-xs text-agri-muted">
-                        1 day ago
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                )}
 
                 <Link
                   href="/dashboard/alerts"
                   className="block border-t border-agri-border px-4 py-3 text-center text-sm font-medium text-accent-blue hover:bg-agri-raised"
-                  onClick={() => setIsAlertsOpen(false)}
+                  onClick={async () => {
+                    setIsAlertsOpen(false);
+                    if (userId) await markAlertsAsViewed(userId);
+                  }}
                 >
                   View all alerts →
                 </Link>

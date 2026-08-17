@@ -188,7 +188,7 @@ export default function HelpPage() {
 
       <footer className="flex items-center justify-between border-t border-agri-border px-8 py-6">
         <p className="text-sm text-agri-muted">
-          &copy; 2026 AgriTrust - Team Innovaro
+          © 2026 AgriTrust. All Rights Reserved. Team Innovaro
         </p>
         <Link
           className="text-sm text-agri-muted hover:text-agri-text"
