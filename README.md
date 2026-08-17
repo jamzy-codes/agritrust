@@ -282,10 +282,6 @@ Creates a new user account with immediate confirmation (no email verification re
 | `AMOY_RPC_URL` | RPC URL for Polygon Amoy testnet (blockchain) |
 | `POLYGONSCAN_API_KEY` | Polygonscan API key for contract verification |
 
-## Author Info
-
-- X: [https://x.com/Only_1_Jamzy](https://x.com/Only_1_Jamzy)
-
 ## Badges
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
