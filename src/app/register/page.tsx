@@ -4,6 +4,8 @@ import { Eye, EyeOff, Lock, Mail, User, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { PhoneInput } from "react-international-phone";
+import "react-international-phone/style.css";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useAccount } from "wagmi";
 import { supabase } from "@/lib/supabase";
@@ -16,6 +18,26 @@ interface RegisterForm {
   phone: string;
   password: string;
   confirmPassword: string;
+}
+
+function formatE164(phoneValue: string): string | null {
+  if (!phoneValue) return null;
+
+  // Remove spaces, dashes, parentheses
+  let cleaned = phoneValue.replace(/[\s\-\(\)]/g, "");
+
+  // Strip extra leading zero after Nigerian dial code +234
+  cleaned = cleaned.replace(/^\+2340+/, "+234");
+
+  // Extract digits only
+  const digitsOnly = cleaned.replace(/\D/g, "");
+
+  // If there are no subscriber digits (e.g. only dial code like +234 with <= 4 digits)
+  if (digitsOnly.length <= 4) {
+    return null;
+  }
+
+  return cleaned.startsWith("+") ? cleaned : `+${cleaned}`;
 }
 
 export default function RegisterPage() {
@@ -38,45 +60,6 @@ export default function RegisterPage() {
   function updateField(field: keyof RegisterForm, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
   }
-
-
-  // async function handleCreateAccount() {
-  //   setError(null);
-  
-
-  //   if (form.password !== form.confirmPassword) {
-  //     setError("Passwords do not match");
-  //     return;
-  //   }
-  //   if (form.password.length < 6) {
-  //     setError("Password must be at least 6 characters");
-  //     return;
-  //   }
-  //   setIsSubmitting(true);
-
-  //   const { data, error: signUpError } = await supabase.auth.signUp({
-  //     email: form.email,
-  //     password: form.password,
-  //     options: {
-  //       data: {
-  //         full_name: form.fullName,
-  //         phone: form.phone,
-  //       },
-  //     },
-  //   });
-
-  //   setIsSubmitting(false);
-
-
-  //   if (signUpError) {
-  //     setError(signUpError.message);
-  //     return;
-  //   }
-
-  //   // Role selection and profile completion happens on the onboarding page.
-  //   // We pass the new user's id along so onboarding can insert the users row.
-  //   router.push("/onboarding");
-  // }
 
   async function handleCreateAccount() {
     setError(null);
@@ -101,7 +84,7 @@ export default function RegisterPage() {
         email: form.email,
         password: form.password,
         fullName: form.fullName,
-        phone: form.phone,
+        phone: formatE164(form.phone),
       }),
     });
 
@@ -186,16 +169,14 @@ export default function RegisterPage() {
 
             <label className="block">
               <span className="mb-1 block text-sm text-agri-muted">Phone</span>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-agri-muted">
-                  🇳🇬 +234
-                </span>
-                <input
-                  className="w-full rounded-lg border border-agri-border bg-agri-raised px-4 py-2.5 pl-20 text-sm text-agri-text placeholder:text-agri-muted transition-colors focus:border-agri-border-focus focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)]"
-                  placeholder="801 234 5678"
-                  type="tel"
+              <div
+                className="[&_.react-international-phone-input-container]:!w-full [&_.react-international-phone-input-container]:!flex [&_.react-international-phone-country-selector-button]:!bg-agri-raised [&_.react-international-phone-country-selector-button]:!border-agri-border [&_.react-international-phone-country-selector-button]:!rounded-l-lg [&_.react-international-phone-country-selector-button]:!h-[42px] [&_.react-international-phone-country-selector-button]:hover:!bg-agri-overlay [&_.react-international-phone-country-selector-dropdown]:!bg-agri-surface [&_.react-international-phone-country-selector-dropdown]:!border-agri-border [&_.react-international-phone-country-selector-dropdown]:!text-agri-text [&_.react-international-phone-country-selector-dropdown-item]:hover:!bg-agri-raised [&_.react-international-phone-country-selector-dropdown-item--selected]:!bg-agri-overlay [&_.react-international-phone-input]:!w-full [&_.react-international-phone-input]:!h-[42px] [&_.react-international-phone-input]:!bg-agri-raised [&_.react-international-phone-input]:!border-agri-border [&_.react-international-phone-input]:!rounded-r-lg [&_.react-international-phone-input]:!text-agri-text [&_.react-international-phone-input]:!px-4 [&_.react-international-phone-input]:!text-sm [&_.react-international-phone-input]:focus:!border-agri-border-focus"
+              >
+                <PhoneInput
+                  defaultCountry="ng"
                   value={form.phone}
-                  onChange={(event) => updateField("phone", event.target.value)}
+                  onChange={(phone) => updateField("phone", phone)}
+                  placeholder="801 234 5678"
                 />
               </div>
             </label>
