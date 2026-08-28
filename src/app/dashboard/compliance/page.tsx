@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import BrandLogo from "@/components/brand/BrandLogo";
+import { api } from "@/lib/api";
 import type { UserRole } from "@/types";
 import { supabase } from "@/lib/supabase";
 
@@ -93,9 +94,21 @@ function RecordsTab() {
         .select("batch_id, crop_type, gmo_status, registered_at")
         .order("registered_at", { ascending: false });
       const batchIds = (batches || []).map((batch) => batch.batch_id);
-      const { data: inspections } = batchIds.length > 0
-        ? await supabase.from("inspections").select("batch_id, quality_grade, inspected_at, certificate_issued, gmo_test_result, inspector_id").in("batch_id", batchIds)
-        : { data: [] };
+      const inspectionResponses = await Promise.all(
+        batchIds.map((batchId) =>
+          api.get<{
+            inspections: Array<{
+              batch_id: string;
+              quality_grade?: string | null;
+              inspected_at?: string | null;
+              certificate_issued?: boolean;
+              gmo_test_result?: string | null;
+              inspector_id?: string | null;
+            }>;
+          }>(`/api/inspections?batchId=${encodeURIComponent(batchId)}`)
+        )
+      );
+      const inspections = inspectionResponses.flatMap((response) => response.inspections);
       const inspectorIds = Array.from(new Set((inspections || []).map((inspection) => inspection.inspector_id).filter(Boolean)));
       const { data: inspectors } = inspectorIds.length > 0
         ? await supabase.from("users").select("id, email, full_name").in("id", inspectorIds)
