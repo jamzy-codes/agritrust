@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CheckCircle2,
   Clock,
@@ -16,6 +16,7 @@ import {
 
 import BrandLogo from "@/components/brand/BrandLogo";
 import type { UserRole } from "@/types";
+import { supabase } from "@/lib/supabase";
 
 type ActiveTab = "records" | "issue";
 
@@ -28,72 +29,6 @@ interface ComplianceRecord {
   issued: string;
   status: "ACTIVE" | "PENDING" | "EXPIRED" | "REVOKED";
 }
-
-const records: ComplianceRecord[] = [
-  {
-    batchId: "AGT-0042",
-    crop: "Cocoa",
-    gmoStatus: "NON-GMO",
-    grade: "A+",
-    inspector: "NAFDAC-0042",
-    issued: "Jun 17, 2026",
-    status: "ACTIVE",
-  },
-  {
-    batchId: "AGT-0038",
-    crop: "Cassava",
-    gmoStatus: "NON-GMO",
-    grade: "A",
-    inspector: "NAFDAC-0039",
-    issued: "Jun 10, 2026",
-    status: "ACTIVE",
-  },
-  {
-    batchId: "AGT-0035",
-    crop: "Cashew",
-    gmoStatus: "NON-GMO",
-    grade: "B+",
-    inspector: "NAFDAC-0031",
-    issued: "Jun 03, 2026",
-    status: "ACTIVE",
-  },
-  {
-    batchId: "AGT-0041",
-    crop: "Yam",
-    gmoStatus: "PENDING",
-    grade: "—",
-    inspector: "Unassigned",
-    issued: "—",
-    status: "PENDING",
-  },
-  {
-    batchId: "AGT-0040",
-    crop: "Maize",
-    gmoStatus: "PENDING",
-    grade: "—",
-    inspector: "Unassigned",
-    issued: "—",
-    status: "PENDING",
-  },
-  {
-    batchId: "AGT-0029",
-    crop: "Palm oil",
-    gmoStatus: "NON-GMO",
-    grade: "A",
-    inspector: "NAFDAC-0022",
-    issued: "May 20, 2026",
-    status: "EXPIRED",
-  },
-  {
-    batchId: "AGT-0024",
-    crop: "Soybean",
-    gmoStatus: "GMO DETECTED",
-    grade: "—",
-    inspector: "NAFDAC-0018",
-    issued: "May 01, 2026",
-    status: "REVOKED",
-  },
-];
 
 const fieldClassName =
   "w-full rounded-lg border border-agri-border bg-agri-raised px-4 py-2.5 text-sm text-agri-text placeholder:text-agri-muted transition-colors focus:border-agri-border-focus focus:outline-none";
@@ -148,6 +83,46 @@ function PageHeading() {
 }
 
 function RecordsTab() {
+  const [records, setRecords] = useState<ComplianceRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadRecords() {
+      const { data: batches } = await supabase
+        .from("batches")
+        .select("batch_id, crop_type, gmo_status, registered_at")
+        .order("registered_at", { ascending: false });
+      const batchIds = (batches || []).map((batch) => batch.batch_id);
+      const { data: inspections } = batchIds.length > 0
+        ? await supabase.from("inspections").select("batch_id, quality_grade, inspected_at, certificate_issued, gmo_test_result, inspector_id").in("batch_id", batchIds)
+        : { data: [] };
+      const inspectorIds = Array.from(new Set((inspections || []).map((inspection) => inspection.inspector_id).filter(Boolean)));
+      const { data: inspectors } = inspectorIds.length > 0
+        ? await supabase.from("users").select("id, email, full_name").in("id", inspectorIds)
+        : { data: [] };
+      const inspectorMap = new Map((inspectors || []).map((inspector) => [inspector.id, inspector.full_name || inspector.email || "Inspector"]));
+      const inspectionMap = new Map((inspections || []).map((inspection) => [inspection.batch_id, inspection]));
+      setRecords((batches || []).map((batch) => {
+        const inspection = inspectionMap.get(batch.batch_id);
+        const certified = Boolean(inspection?.certificate_issued);
+        return {
+          batchId: batch.batch_id,
+          crop: batch.crop_type,
+          gmoStatus: inspection?.gmo_test_result === "GMO_PRESENT" ? "GMO DETECTED" : inspection ? "NON-GMO" : "PENDING",
+          grade: inspection?.quality_grade || "—",
+          inspector: inspection?.inspector_id ? inspectorMap.get(inspection.inspector_id) || "Inspector" : "Unassigned",
+          issued: certified && inspection?.inspected_at ? new Date(inspection.inspected_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—",
+          status: certified ? "ACTIVE" : "PENDING",
+        };
+      }));
+      setIsLoading(false);
+    }
+    loadRecords();
+  }, []);
+
+  const certifiedCount = records.filter((record) => record.status === "ACTIVE").length;
+  const pendingCount = records.filter((record) => record.status === "PENDING").length;
+
   return (
     <>
       <section className="mb-4 px-8">
@@ -164,23 +139,23 @@ function RecordsTab() {
 
       <div className="mb-6 flex gap-4 px-8">
         <div className="flex items-center gap-3 rounded-xl card-gradient-green border border-white/5 px-4 py-3">
-          <ShieldCheck className="h-[18px] w-[18px] text-accent-green" />
+          <ShieldCheck className="h-4.5 w-4.5 text-accent-green" />
           <div>
-            <p className="text-xl font-bold text-agri-text">6</p>
+            <p className="text-xl font-bold text-agri-text">{certifiedCount}</p>
             <p className="text-sm text-agri-muted">Certified batches</p>
           </div>
         </div>
         <div className="flex items-center gap-3 rounded-xl card-gradient-amber border border-white/5 px-4 py-3">
-          <Clock className="h-[18px] w-[18px] text-accent-amber" />
+          <Clock className="h-4.5 w-4.5 text-accent-amber" />
           <div>
-            <p className="text-xl font-bold text-agri-text">2</p>
+            <p className="text-xl font-bold text-agri-text">{pendingCount}</p>
             <p className="text-sm text-agri-muted">Pending inspection</p>
           </div>
         </div>
         <div className="flex items-center gap-3 rounded-xl card-gradient-purple border border-white/5 px-4 py-3">
-          <Star className="h-[18px] w-[18px] text-accent-purple" />
+          <Star className="h-4.5 w-4.5 text-accent-purple" />
           <div>
-            <p className="text-xl font-bold text-agri-text">4.9</p>
+            <p className="text-xl font-bold text-agri-text">{records.length ? `${Math.round((certifiedCount / records.length) * 100)}%` : "0%"}</p>
             <p className="text-sm text-agri-muted">Compliance score</p>
           </div>
         </div>
@@ -210,7 +185,7 @@ function RecordsTab() {
             </tr>
           </thead>
           <tbody>
-            {records.map((record) => (
+            {isLoading ? <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-agri-muted">Loading compliance records...</td></tr> : records.length === 0 ? <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-agri-muted">No compliance records yet.</td></tr> : records.map((record) => (
               <tr
                 key={record.batchId}
                 className="transition-colors hover:bg-agri-raised/50"
@@ -445,7 +420,7 @@ function IssueCertificateTab() {
 
           <div className="mt-4 flex items-end justify-between">
             <div className="flex flex-col items-center">
-              <div className="flex h-[60px] w-[60px] items-center justify-center rounded border border-gray-300 bg-gray-200">
+              <div className="flex h-15 w-15 items-center justify-center rounded border border-gray-300 bg-gray-200">
                 <QrCode className="h-6 w-6 text-gray-400" />
               </div>
               <p className="mt-1 text-[10px] text-gray-400">Scan to verify</p>
@@ -469,8 +444,18 @@ function IssueCertificateTab() {
 }
 
 export default function CompliancePage() {
-  const MOCK_ROLE: UserRole = "FARMER";
-  const allowedTabIds = roleTabs[MOCK_ROLE];
+  const [role, setRole] = useState<UserRole>("FARMER");
+  useEffect(() => {
+    async function loadRole() {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) return;
+      const { data: profile } = await supabase.from("users").select("role").eq("id", userData.user.id).maybeSingle();
+      if (profile?.role) setRole(profile.role as UserRole);
+    }
+    loadRole();
+  }, []);
+
+  const allowedTabIds = roleTabs[role];
   const [activeTab, setActiveTab] = useState<ActiveTab>(
     allowedTabIds[0] ?? "records",
   );
@@ -503,11 +488,10 @@ export default function CompliancePage() {
             return (
               <button
                 key={id}
-                className={`flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition-all ${
-                  isActive
-                    ? activeClass
-                    : "border border-agri-border text-agri-muted hover:bg-agri-raised hover:text-agri-text"
-                }`}
+                className={`flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition-all ${isActive
+                  ? activeClass
+                  : "border border-agri-border text-agri-muted hover:bg-agri-raised hover:text-agri-text"
+                  }`}
                 type="button"
                 onClick={() => setActiveTab(id)}
               >

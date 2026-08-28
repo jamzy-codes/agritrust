@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Camera, Sprout } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { api } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import type { UserRole } from "@/types";
 
@@ -52,20 +53,11 @@ export default function FarmsPage() {
       setRole(userRole);
 
       if (userRole === "REGULATOR" || userRole === "INSPECTOR") {
-        const { data: farmsData } = await supabase
-          .from("farms")
-          .select("*")
-          .order("created_at", { ascending: false });
-
-        setAllFarms(farmsData || []);
+        const response = await api.get<{ farms: Farm[] }>("/api/farms");
+        setAllFarms(response.farms || []);
       } else {
-        const { data: farmData } = await supabase
-          .from("farms")
-          .select("*")
-          .eq("owner_id", userId)
-          .maybeSingle();
-
-        setFarmerFarm(farmData || null);
+        const response = await api.get<{ farms: Farm[] }>(`/api/farms?ownerId=${userId}`);
+        setFarmerFarm((response.farms && response.farms[0]) || null);
       }
 
       setIsLoading(false);

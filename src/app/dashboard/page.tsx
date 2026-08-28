@@ -29,19 +29,12 @@ import {
   YAxis,
 } from "recharts";
 
-import { PRIMARY_BATCH } from "@/lib/mockData";
 import type { UserRole } from "@/types";
 import { MiniTimeline } from "@/components/ui/MiniTimeline";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-
-const batchRows = [
-  { id: PRIMARY_BATCH.batchId, crop: `${PRIMARY_BATCH.cropType} · ${PRIMARY_BATCH.quantityKg} kg` },
-  { id: "AGT-0041", crop: "Cassava · 800 kg" },
-  { id: "AGT-0039", crop: "Cashew · 300 kg" },
-];
 
 const regionData = [
   { state: "Rivers State", compliance: 99.1 },
@@ -102,20 +95,46 @@ function StatCard({ icon: Icon, value, label, iconBg, iconColor, glow, bgClassNa
 
 function FarmerDashboard() {
   const [userName, setUserName] = useState<string>("");
+  const [batches, setBatches] = useState<Array<{
+    batch_id: string;
+    crop_type: string;
+    quantity_kg: number;
+    status: string;
+  }>>([]);
+  const [certifiedBatchIds, setCertifiedBatchIds] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     async function loadUser() {
-      const { data: userData, error: userError } =
-        await supabase.auth.getUser();
-      if (!userError && userData.user) {
+      try {
+        const { data: userData, error: userError } = await supabase.auth.getUser();
+        if (userError || !userData.user) return;
+
         const { data: profile } = await supabase
           .from("users")
           .select("full_name, email")
           .eq("id", userData.user.id)
           .single();
+        setUserName(profile?.full_name || profile?.email || "User");
 
-        const fullName = profile?.full_name || profile?.email || "User";
-        setUserName(fullName);
+        const { data: userBatches } = await supabase
+          .from("batches")
+          .select("batch_id, crop_type, quantity_kg, status")
+          .eq("registered_by", userData.user.id)
+          .order("registered_at", { ascending: false });
+        const loadedBatches = userBatches || [];
+        setBatches(loadedBatches);
+
+        if (loadedBatches.length > 0) {
+          const { data: inspections } = await supabase
+            .from("inspections")
+            .select("batch_id")
+            .in("batch_id", loadedBatches.map((batch) => batch.batch_id))
+            .eq("certificate_issued", true);
+          setCertifiedBatchIds(Array.from(new Set((inspections || []).map((inspection) => inspection.batch_id))));
+        }
+      } finally {
+        setIsLoading(false);
       }
     }
     loadUser();
@@ -123,10 +142,12 @@ function FarmerDashboard() {
 
   const firstName = userName ? userName.split(" ")[0] : "User";
   const [completedActions, setCompletedActions] = useState<string[]>([]);
+  const activeBatches = batches.filter((batch) => batch.status !== "DELIVERED");
+  const awaitingInspection = batches.filter((batch) => !certifiedBatchIds.includes(batch.batch_id));
   const stats: StatCardProps[] = [
     {
       icon: Sprout,
-      value: "8",
+      value: String(activeBatches.length),
       label: "Active batches",
       iconBg: "bg-accent-green/10",
       iconColor: "text-accent-green",
@@ -136,7 +157,7 @@ function FarmerDashboard() {
     },
     {
       icon: ShieldCheck,
-      value: "6",
+      value: String(certifiedBatchIds.length),
       label: "Certified compliant",
       iconBg: "bg-accent-blue/10",
       iconColor: "text-accent-blue",
@@ -146,7 +167,7 @@ function FarmerDashboard() {
     },
     {
       icon: Clock,
-      value: "2",
+      value: String(awaitingInspection.length),
       label: "Awaiting inspection",
       iconBg: "bg-accent-amber/10",
       iconColor: "text-accent-amber",
@@ -156,7 +177,7 @@ function FarmerDashboard() {
     },
     {
       icon: ChainLink,
-      value: "14",
+      value: String(batches.length),
       label: "Total registered",
       iconBg: "bg-accent-purple/10",
       iconColor: "text-accent-purple",
@@ -165,29 +186,13 @@ function FarmerDashboard() {
       iconGlow: "glow-purple",
     },
   ];
-  const upcomingActions = [
-    {
-      id: "agt-0041-inspection",
-      icon: AlertTriangle,
-      color: "text-accent-amber",
-      task: "AGT-0041 awaiting inspection",
-      due: "Due Jun 25",
-    },
-    {
-      id: "q2-practices-report",
-      icon: FileText,
-      color: "text-accent-blue",
-      task: "Submit Q2 farming practices report",
-      due: "Due Jun 30",
-    },
-    {
-      id: "nasc-renewal",
-      icon: Bell,
-      color: "text-accent-purple",
-      task: "Renew NASC seed certification",
-      due: "Due Jul 15",
-    },
-  ];
+  const upcomingActions = awaitingInspection.slice(0, 3).map((batch) => ({
+    id: `${batch.batch_id}-inspection`,
+    icon: AlertTriangle,
+    color: "text-accent-amber",
+    task: `${batch.batch_id} awaiting inspection`,
+    due: "Inspection pending",
+  }));
 
   function completeAction(actionId: string) {
     setCompletedActions((current) =>
@@ -227,22 +232,28 @@ function FarmerDashboard() {
           <div className="p-6">
             <h2 className="mb-4 text-lg font-semibold text-agri-text">Your active supply chains</h2>
             <div className="divide-y divide-agri-border">
-              {batchRows.map((batch) => (
-                <div key={batch.id} className="flex items-center gap-6 py-4">
+              {isLoading ? (
+                <p className="py-8 text-center text-sm text-agri-muted">Loading batches...</p>
+              ) : activeBatches.length === 0 ? (
+                <p className="py-8 text-center text-sm text-agri-muted">No batches registered yet.</p>
+              ) : activeBatches.map((batch) => (
+                <div key={batch.batch_id} className="flex items-center gap-6 py-4">
                   <div className="min-w-40">
                     <Link
                       className="font-mono text-sm font-bold text-agri-text hover:text-accent-blue"
-                      href={`/dashboard/trace/${batch.id}`}
+                      href={`/dashboard/trace/${batch.batch_id}`}
                     >
-                      {batch.id}
+                      {batch.batch_id}
                     </Link>
-                    <p className="mt-0.5 text-xs text-agri-muted">{batch.crop}</p>
+                    <p className="mt-0.5 text-xs text-agri-muted">
+                      {batch.crop_type} · {batch.quantity_kg} kg
+                    </p>
                   </div>
                   <div className="flex-1">
                     <MiniTimeline stages={["complete", "complete", "complete", "current", "pending"]} />
                   </div>
                   <span className="rounded-full bg-accent-amber/20 px-3 py-1 text-xs font-bold text-accent-amber">
-                    IN TRANSIT
+                    {batch.status}
                   </span>
                 </div>
               ))}
@@ -255,22 +266,21 @@ function FarmerDashboard() {
         <GradientCard bgClassName="glass">
           <div className="p-5">
             <h3 className="mb-4 text-base font-semibold text-agri-text">Recent certifications</h3>
-            {[
-              ["AGT-0042 Biosafety Certificate", "NAFDAC-0042 · Jun 17, 2026"],
-              ["AGT-0038 Compliance Certificate", "NAFDAC-0039 · Jun 10, 2026"],
-              ["AGT-0035 Quality Grade Certificate", "NAFDAC-0031 · Jun 03, 2026"],
-            ].map(([title, meta]) => (
-              <div key={title} className="flex items-start gap-3 border-b border-agri-border py-3 last:border-0">
+            {batches.filter((batch) => certifiedBatchIds.includes(batch.batch_id)).slice(0, 3).map((batch) => (
+              <div key={batch.batch_id} className="flex items-start gap-3 border-b border-agri-border py-3 last:border-0">
                 <Award className="h-4.5 w-4.5 shrink-0 text-accent-purple" />
                 <div>
-                  <p className="text-sm font-medium text-agri-text">{title}</p>
-                  <p className="text-xs text-agri-muted">{meta}</p>
+                  <p className="text-sm font-medium text-agri-text">{batch.batch_id} Biosafety Certificate</p>
+                  <p className="text-xs text-agri-muted">Certificate issued</p>
                   <span className="mt-2 inline-flex rounded-full bg-accent-green/20 px-2 py-0.5 text-xs font-bold text-accent-green">
                     Active
                   </span>
                 </div>
               </div>
             ))}
+            {!isLoading && certifiedBatchIds.length === 0 ? (
+              <p className="text-sm text-agri-muted">No certificates issued yet.</p>
+            ) : null}
             <Link className="mt-3 block text-sm text-accent-green" href="/dashboard/compliance">
               View all certifications →
             </Link>

@@ -2,8 +2,6 @@
 
 import {
   Calendar,
-  ChevronLeft,
-  ChevronRight,
   LayoutGrid,
   LayoutList,
   MapPin,
@@ -13,8 +11,10 @@ import {
   Upload,
 } from "lucide-react";
 import Link from "next/link";
+import { useEffect, useState } from "react";
 
 import { MiniTimeline } from "@/components/ui/MiniTimeline";
+import { supabase } from "@/lib/supabase";
 
 interface TraceBatch {
   batchId: string;
@@ -22,93 +22,19 @@ interface TraceBatch {
   quantityKg: number;
   region: string;
   date: string;
-  status: "CERTIFIED" | "IN TRANSIT" | "AWAITING INSPECTION" | "FLAGGED";
+  status: string;
   stages: Array<"complete" | "current" | "pending">;
 }
 
-const MOCK_BATCHES: TraceBatch[] = [
-  {
-    batchId: "AGT-0042",
-    cropType: "Grade A Cocoa",
-    quantityKg: 500,
-    region: "Rivers State",
-    date: "Jun 14, 2026",
-    status: "CERTIFIED",
-    stages: ["complete", "complete", "complete", "complete", "complete"],
-  },
-  {
-    batchId: "AGT-0043",
-    cropType: "Dried Hibiscus",
-    quantityKg: 250,
-    region: "Kano State",
-    date: "Jun 13, 2026",
-    status: "IN TRANSIT",
-    stages: ["complete", "complete", "complete", "current", "pending"],
-  },
-  {
-    batchId: "AGT-0044",
-    cropType: "Sesame Seeds",
-    quantityKg: 1000,
-    region: "Kaduna State",
-    date: "Jun 12, 2026",
-    status: "CERTIFIED",
-    stages: ["complete", "complete", "complete", "complete", "complete"],
-  },
-  {
-    batchId: "AGT-0045",
-    cropType: "Maize (White)",
-    quantityKg: 750,
-    region: "Oyo State",
-    date: "Jun 12, 2026",
-    status: "AWAITING INSPECTION",
-    stages: ["complete", "complete", "current", "pending", "pending"],
-  },
-  {
-    batchId: "AGT-0046",
-    cropType: "Palm Kernel",
-    quantityKg: 600,
-    region: "Edo State",
-    date: "Jun 11, 2026",
-    status: "FLAGGED",
-    stages: ["complete", "current", "pending", "pending", "pending"],
-  },
-  {
-    batchId: "AGT-0047",
-    cropType: "Ginger",
-    quantityKg: 300,
-    region: "Nasarawa State",
-    date: "Jun 11, 2026",
-    status: "CERTIFIED",
-    stages: ["complete", "complete", "complete", "complete", "complete"],
-  },
-  {
-    batchId: "AGT-0048",
-    cropType: "Cowpea",
-    quantityKg: 400,
-    region: "Borno State",
-    date: "Jun 10, 2026",
-    status: "IN TRANSIT",
-    stages: ["complete", "complete", "complete", "current", "pending"],
-  },
-  {
-    batchId: "AGT-0049",
-    cropType: "Cassava Chips",
-    quantityKg: 850,
-    region: "Delta State",
-    date: "Jun 10, 2026",
-    status: "FLAGGED",
-    stages: ["complete", "pending", "pending", "pending", "pending"],
-  },
-];
-
-const statusClassName: Record<TraceBatch["status"], string> = {
+const statusClassName: Record<string, string> = {
   CERTIFIED: "bg-accent-green/20 text-accent-green",
   "IN TRANSIT": "bg-accent-amber/20 text-accent-amber",
   "AWAITING INSPECTION": "border border-accent-amber bg-transparent text-accent-amber",
   FLAGGED: "bg-accent-red/20 text-accent-red",
+  DELIVERED: "bg-accent-green/20 text-accent-green",
 };
 
-const statusHoverGlow: Record<TraceBatch["status"], string> = {
+const statusHoverGlow: Record<string, string> = {
   CERTIFIED: "hover:shadow-[0_0_12px_rgba(34,197,94,0.35)]",
   "IN TRANSIT": "hover:shadow-[0_0_12px_rgba(245,158,11,0.35)]",
   "AWAITING INSPECTION": "hover:shadow-[0_0_12px_rgba(245,158,11,0.35)]",
@@ -119,6 +45,30 @@ const selectClassName =
   "rounded-lg border border-agri-border bg-agri-raised px-3 py-2 text-sm text-agri-text transition-colors focus:border-agri-border-focus focus:outline-none";
 
 export default function TracePage() {
+  const [batches, setBatches] = useState<TraceBatch[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadBatches() {
+      const { data: batchRows } = await supabase
+        .from("batches")
+        .select("batch_id, crop_type, quantity_kg, status, registered_at, farm_id")
+        .order("registered_at", { ascending: false });
+      const batchIds = (batchRows || []).map((batch) => batch.batch_id);
+      const { data: inspections } = batchIds.length > 0
+        ? await supabase.from("inspections").select("batch_id, certificate_issued").in("batch_id", batchIds)
+        : { data: [] };
+      const certifiedIds = new Set((inspections || []).filter((inspection) => inspection.certificate_issued).map((inspection) => inspection.batch_id));
+      setBatches((batchRows || []).map((batch) => {
+        const status = certifiedIds.has(batch.batch_id) ? "CERTIFIED" : batch.status === "DELIVERED" ? "DELIVERED" : batch.status === "FLAGGED" ? "FLAGGED" : batch.status === "IN_TRANSIT" ? "IN TRANSIT" : "AWAITING INSPECTION";
+        const stages: TraceBatch["stages"] = status === "CERTIFIED" ? ["complete", "complete", "complete", "complete", "complete"] : status === "IN TRANSIT" ? ["complete", "complete", "complete", "current", "pending"] : ["complete", "complete", "current", "pending", "pending"];
+        return { batchId: batch.batch_id, cropType: batch.crop_type, quantityKg: Number(batch.quantity_kg), region: batch.farm_id || "Farm record", date: batch.registered_at ? new Date(batch.registered_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Unknown", status, stages };
+      }));
+      setIsLoading(false);
+    }
+    loadBatches();
+  }, []);
+
   return (
     <div className="pb-8">
       <header className="mb-6 px-8 pt-8">
@@ -168,18 +118,18 @@ export default function TracePage() {
       </section>
 
       <section className="mx-8 overflow-hidden rounded-xl border border-agri-border bg-agri-surface divide-y divide-agri-border">
-        {MOCK_BATCHES.map((batch) => (
+        {isLoading ? <p className="px-6 py-10 text-center text-sm text-agri-muted">Loading batches...</p> : batches.length === 0 ? <p className="px-6 py-10 text-center text-sm text-agri-muted">No batches recorded yet.</p> : batches.map((batch) => (
           <article
             key={batch.batchId}
             className="flex items-center gap-6 px-6 py-4 transition-colors hover:bg-agri-raised/80"
           >
             <span
-              className={`w-36 flex-shrink-0 rounded-full px-3 py-1.5 text-center text-xs font-bold transition-all duration-300 ${statusClassName[batch.status]} ${statusHoverGlow[batch.status]}`}
+              className={`w-36 shrink-0 rounded-full px-3 py-1.5 text-center text-xs font-bold transition-all duration-300 ${statusClassName[batch.status]} ${statusHoverGlow[batch.status] || ""}`}
             >
               {batch.status}
             </span>
 
-            <div className="w-48 flex-shrink-0">
+            <div className="w-48 shrink-0">
               <p className="text-sm font-medium text-agri-text">{batch.cropType}</p>
               <p className="font-mono text-sm font-bold text-agri-text">{batch.batchId}</p>
               <div className="mt-1 flex flex-wrap items-center gap-3">
@@ -202,8 +152,8 @@ export default function TracePage() {
               <MiniTimeline stages={batch.stages} />
             </div>
 
-            <div className="flex flex-shrink-0 items-center gap-4">
-              <QrCode className="h-[18px] w-[18px] cursor-pointer text-agri-muted hover:text-accent-green" />
+            <div className="flex shrink-0 items-center gap-4">
+              <QrCode className="h-4.5 w-4.5 cursor-pointer text-agri-muted hover:text-accent-green" />
               <Link
                 className="text-sm text-accent-blue hover:text-accent-blue/80"
                 href={`/dashboard/trace/${batch.batchId}`}
@@ -216,23 +166,7 @@ export default function TracePage() {
       </section>
 
       <footer className="mt-2 flex items-center justify-between px-8 py-4">
-        <p className="text-sm text-agri-muted">Showing 1-8 of 47 batches</p>
-        <div className="flex gap-1">
-          <button className="rounded-lg px-3 py-1.5 text-sm text-agri-muted hover:text-agri-text" type="button" aria-label="Previous page">
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <button className="rounded-lg bg-accent-purple px-3 py-1.5 text-sm text-white" type="button">
-            1
-          </button>
-          {["2", "3", "...", "6"].map((page) => (
-            <button key={page} className="rounded-lg px-3 py-1.5 text-sm text-agri-muted hover:text-agri-text" type="button">
-              {page}
-            </button>
-          ))}
-          <button className="rounded-lg px-3 py-1.5 text-sm text-agri-muted hover:text-agri-text" type="button" aria-label="Next page">
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
+        <p className="text-sm text-agri-muted">Showing {batches.length} batches</p>
       </footer>
     </div>
   );

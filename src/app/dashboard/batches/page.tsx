@@ -1,111 +1,62 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { Search } from "lucide-react";
+import { api } from "@/lib/api";
 
-const stats = [
-  { value: "47", label: "Total batches" },
-  { value: "38", label: "Certified" },
-  { value: "9", label: "In progress" },
-];
+interface BatchRow {
+  id: string;
+  crop: string;
+  quantity: string;
+  farm: string;
+  status: string;
+  statusTone: string;
+  registered: string;
+}
 
-const batches = [
-  {
-    id: "AGT-0042",
-    crop: "Grade A Cocoa",
-    quantity: "500 kg",
-    farm: "Okafor Family Farm",
-    status: "CERTIFIED",
-    statusTone: "bg-accent-green/20 text-accent-green",
-    registered: "Jun 14, 2026",
-  },
-  {
-    id: "AGT-0043",
-    crop: "Dried Hibiscus",
-    quantity: "250 kg",
-    farm: "Sunrise Agro Ltd",
-    status: "IN TRANSIT",
-    statusTone: "bg-accent-amber/20 text-accent-amber",
-    registered: "Jun 13, 2026",
-  },
-  {
-    id: "AGT-0044",
-    crop: "Sesame Seeds",
-    quantity: "1,000 kg",
-    farm: "Northern Grains Co-op",
-    status: "CERTIFIED",
-    statusTone: "bg-accent-green/20 text-accent-green",
-    registered: "Jun 12, 2026",
-  },
-  {
-    id: "AGT-0045",
-    crop: "Maize (White)",
-    quantity: "750 kg",
-    farm: "GreenFields Farms",
-    status: "AWAITING INSPECTION",
-    statusTone: "border border-accent-amber text-accent-amber",
-    registered: "Jun 12, 2026",
-  },
-  {
-    id: "AGT-0046",
-    crop: "Palm Kernel",
-    quantity: "600 kg",
-    farm: "Ife Agri Cooperative",
-    status: "FLAGGED",
-    statusTone: "bg-accent-red/20 text-accent-red",
-    registered: "Jun 11, 2026",
-  },
-  {
-    id: "AGT-0047",
-    crop: "Ginger",
-    quantity: "300 kg",
-    farm: "Niger Delta Rice Farms",
-    status: "CERTIFIED",
-    statusTone: "bg-accent-green/20 text-accent-green",
-    registered: "Jun 11, 2026",
-  },
-  {
-    id: "AGT-0048",
-    crop: "Cowpea",
-    quantity: "400 kg",
-    farm: "Okafor Family Farm",
-    status: "IN TRANSIT",
-    statusTone: "bg-accent-amber/20 text-accent-amber",
-    registered: "Jun 10, 2026",
-  },
-  {
-    id: "AGT-0049",
-    crop: "Cassava Chips",
-    quantity: "850 kg",
-    farm: "Sunrise Agro Ltd",
-    status: "FLAGGED",
-    statusTone: "bg-accent-red/20 text-accent-red",
-    registered: "Jun 10, 2026",
-  },
-  {
-    id: "AGT-0050",
-    crop: "Yam Flour",
-    quantity: "320 kg",
-    farm: "Northern Grains Co-op",
-    status: "REGISTERED",
-    statusTone: "bg-accent-blue/20 text-accent-blue",
-    registered: "Jun 09, 2026",
-  },
-  {
-    id: "AGT-0051",
-    crop: "Plantain",
-    quantity: "480 kg",
-    farm: "GreenFields Farms",
-    status: "REGISTERED",
-    statusTone: "bg-accent-blue/20 text-accent-blue",
-    registered: "Jun 09, 2026",
-  },
-];
+function statusTone(status: string) {
+  if (status === "CERTIFIED") return "bg-accent-green/20 text-accent-green";
+  if (status === "FLAGGED") return "bg-accent-red/20 text-accent-red";
+  if (status === "REGISTERED") return "bg-accent-blue/20 text-accent-blue";
+  return "bg-accent-amber/20 text-accent-amber";
+}
 
 export default function BatchesPage() {
-  const [currentPage, setCurrentPage] = useState(1);
-  const pages = [1, 2, 3, 4, 5];
+  const [batches, setBatches] = useState<BatchRow[]>([]);
+  const [search, setSearch] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadBatches() {
+      try {
+        const response = await api.get<{ batches: Array<{ batch_id: string; crop_type: string; quantity_kg: number | string; status: string; registered_at?: string; farms?: { farm_name?: string } | { farm_name?: string }[] }> }>("/api/batches");
+
+        setBatches((response.batches || []).map((batch) => ({
+          id: batch.batch_id,
+          crop: batch.crop_type,
+          quantity: `${Number(batch.quantity_kg).toLocaleString()} kg`,
+          farm: (Array.isArray(batch.farms) ? batch.farms[0] : batch.farms as { farm_name?: string } | null)?.farm_name || "Unassigned farm",
+          status: batch.status,
+          statusTone: statusTone(batch.status),
+          registered: batch.registered_at ? new Date(batch.registered_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Unknown",
+        })));
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    loadBatches();
+  }, []);
+
+  const filteredBatches = batches.filter((batch) =>
+    `${batch.id} ${batch.crop} ${batch.farm}`.toLowerCase().includes(search.toLowerCase()),
+  );
+  const stats = [
+    { value: batches.length.toString(), label: "Total batches" },
+    { value: batches.filter((batch) => batch.status === "CERTIFIED").length.toString(), label: "Certified" },
+    { value: batches.filter((batch) => batch.status !== "CERTIFIED").length.toString(), label: "In progress" },
+  ];
 
   return (
     <div className="pb-10">
@@ -139,6 +90,8 @@ export default function BatchesPage() {
           <input
             className="w-72 rounded-lg border border-agri-border bg-agri-surface py-2 pl-9 pr-4 text-sm text-agri-text placeholder:text-agri-muted focus:border-agri-border-focus focus:outline-none"
             placeholder="Search by batch ID or crop..."
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
           />
         </div>
         <select className="rounded-lg border border-agri-border bg-agri-surface px-3 py-2 text-sm text-agri-text">
@@ -172,7 +125,7 @@ export default function BatchesPage() {
             </tr>
           </thead>
           <tbody>
-            {batches.map((batch) => (
+            {isLoading ? <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-agri-muted">Loading batches...</td></tr> : filteredBatches.length === 0 ? <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-agri-muted">No batches found.</td></tr> : filteredBatches.map((batch) => (
               <tr key={batch.id} className="border-t border-agri-border">
                 <td className="px-4 py-3 font-mono text-xs font-bold text-accent-cyan">
                   {batch.id}
@@ -211,35 +164,7 @@ export default function BatchesPage() {
       </div>
 
       <div className="mx-8 mt-4 flex flex-col gap-2 text-sm text-agri-muted">
-        <p>Showing 1-10 of 47 batches</p>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            className="rounded-lg px-3 py-1.5 text-sm text-agri-muted hover:text-agri-text"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          {pages.map((page) => (
-            <button
-              key={page}
-              type="button"
-              className={`rounded-lg px-3 py-1.5 text-sm ${
-                currentPage === page
-                  ? "bg-accent-purple text-white"
-                  : "text-agri-muted hover:text-agri-text"
-              }`}
-              onClick={() => setCurrentPage(page)}
-            >
-              {page}
-            </button>
-          ))}
-          <button
-            type="button"
-            className="rounded-lg px-3 py-1.5 text-sm text-agri-muted hover:text-agri-text"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
+        <p>Showing {filteredBatches.length} of {batches.length} batches</p>
       </div>
     </div>
   );

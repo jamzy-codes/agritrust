@@ -25,6 +25,7 @@ import {
   Unlink,
 } from "lucide-react";
 
+import { api } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import type { UserRole } from "@/types";
 
@@ -101,12 +102,16 @@ export default function SettingsPage() {
       const emailConfirmedAt = (userData.user as unknown as { confirmed_at?: string }).confirmed_at ||
         (userData.user as unknown as { email_confirmed_at?: string }).email_confirmed_at || null;
 
-      // 1. Fetch public.users
-      const { data: profile } = await supabase
-        .from("users")
-        .select("id, full_name, email, role, wallet_address")
-        .eq("id", userId)
-        .single();
+      // 1. Fetch the profile through the server API.
+      const { user: profile } = await api.get<{
+        user: {
+          id: string;
+          full_name: string | null;
+          email: string | null;
+          role: UserRole;
+          wallet_address: string | null;
+        };
+      }>(`/api/users/${userId}`);
 
       if (profile) {
         const uRole = (profile.role as UserRole) || "FARMER";
@@ -141,11 +146,17 @@ export default function SettingsPage() {
 
         // 3. If Farmer, fetch public.farms
         if (uRole === "FARMER") {
-          const { data: farm } = await supabase
-            .from("farms")
-            .select("*")
-            .eq("owner_id", userId)
-            .maybeSingle();
+          const { farms } = await api.get<{
+            farms: Array<{
+              id: string;
+              farm_name: string;
+              location: string;
+              gps_coordinates: string | null;
+              nasc_registration: string | null;
+              primary_crops: string[] | null;
+            }>;
+          }>(`/api/farms?ownerId=${encodeURIComponent(userId)}`);
+          const farm = farms[0];
 
           if (farm) {
             setFarmId(farm.id);
@@ -203,31 +214,29 @@ export default function SettingsPage() {
     setSaveStatus("saving");
     try {
       if (userProfile && ownerName.trim()) {
-        await supabase
-          .from("users")
-          .update({ full_name: ownerName.trim() })
-          .eq("id", userProfile.id);
+        await api.patch(`/api/users/${userProfile.id}`, {
+          fullName: ownerName.trim(),
+        });
 
         setUserProfile((prev) => (prev ? { ...prev, fullName: ownerName.trim() } : prev));
       }
 
       if (role === "FARMER" && userProfile) {
-        const { data: updatedFarm, error: farmErr } = await supabase
-          .from("farms")
-          .upsert({
-            ...(farmId ? { id: farmId } : {}),
-            owner_id: userProfile.id,
-            farm_name: farmName.trim() || "My Farm",
-            location: farmLocation.trim() || "Rivers State, Nigeria",
-            gps_coordinates: gpsCoordinates.trim() || null,
-            nasc_registration: nascRegistration.trim() || null,
-            primary_crops: crops,
-          })
-          .select()
-          .single();
+        const payload = {
+          ownerId: userProfile.id,
+          farmName: farmName.trim() || "My Farm",
+          location: farmLocation.trim() || "Rivers State, Nigeria",
+          gpsCoordinates: gpsCoordinates.trim() || null,
+          nascRegistration: nascRegistration.trim() || null,
+          primaryCrops: crops,
+        };
 
-        if (!farmErr && updatedFarm) {
-          setFarmId(updatedFarm.id);
+        if (farmId) {
+          const response = await api.patch<{ farm: { id: string } }>(`/api/farms/${farmId}`, payload);
+          setFarmId(response.farm.id);
+        } else {
+          const response = await api.post<{ farm: { id: string } }>("/api/farms", payload);
+          setFarmId(response.farm.id);
         }
       }
     } catch (e) {
@@ -242,14 +251,10 @@ export default function SettingsPage() {
     if (!address || !userProfile) return;
     setUpdatingWallet(true);
     try {
-      const { error } = await supabase
-        .from("users")
-        .update({ wallet_address: address })
-        .eq("id", userProfile.id);
-
-      if (!error) {
-        setUserProfile((prev) => (prev ? { ...prev, walletAddress: address } : prev));
-      }
+      await api.patch(`/api/users/${userProfile.id}`, {
+        walletAddress: address,
+      });
+      setUserProfile((prev) => (prev ? { ...prev, walletAddress: address } : prev));
     } catch (e) {
       console.error("Error updating wallet address:", e);
     } finally {
@@ -298,13 +303,12 @@ export default function SettingsPage() {
                   key={key}
                   type="button"
                   onClick={() => setActiveSection(key)}
-                  className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all cursor-pointer ${
-                    isActive
-                      ? isDanger
-                        ? "bg-accent-red/10 font-medium text-accent-red"
-                        : "bg-accent-green/10 font-medium text-accent-green"
-                      : "text-agri-muted hover:bg-agri-raised hover:text-agri-text"
-                  }`}
+                  className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all cursor-pointer ${isActive
+                    ? isDanger
+                      ? "bg-accent-red/10 font-medium text-accent-red"
+                      : "bg-accent-green/10 font-medium text-accent-green"
+                    : "text-agri-muted hover:bg-agri-raised hover:text-agri-text"
+                    }`}
                 >
                   <Icon
                     className={`h-4 w-4 ${isDanger ? "text-red-400" : ""}`}
@@ -587,13 +591,12 @@ export default function SettingsPage() {
                 <div className="mt-6 flex justify-end">
                   <button
                     type="button"
-                    className={`flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-medium text-white transition-colors cursor-pointer ${
-                      saveStatus === "saved"
-                        ? "bg-accent-green"
-                        : saveStatus === "saving"
-                          ? "bg-accent-blue/70"
-                          : "bg-accent-blue hover:bg-accent-blue/90"
-                    }`}
+                    className={`flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-medium text-white transition-colors cursor-pointer ${saveStatus === "saved"
+                      ? "bg-accent-green"
+                      : saveStatus === "saving"
+                        ? "bg-accent-blue/70"
+                        : "bg-accent-blue hover:bg-accent-blue/90"
+                      }`}
                     onClick={saveProfileChanges}
                     disabled={saveStatus !== "idle"}
                   >
