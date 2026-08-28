@@ -14,7 +14,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { MiniTimeline } from "@/components/ui/MiniTimeline";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
 
 interface TraceBatch {
   batchId: string;
@@ -50,21 +50,41 @@ export default function TracePage() {
 
   useEffect(() => {
     async function loadBatches() {
-      const { data: batchRows } = await supabase
-        .from("batches")
-        .select("batch_id, crop_type, quantity_kg, status, registered_at, farm_id")
-        .order("registered_at", { ascending: false });
-      const batchIds = (batchRows || []).map((batch) => batch.batch_id);
-      const { data: inspections } = batchIds.length > 0
-        ? await supabase.from("inspections").select("batch_id, certificate_issued").in("batch_id", batchIds)
-        : { data: [] };
-      const certifiedIds = new Set((inspections || []).filter((inspection) => inspection.certificate_issued).map((inspection) => inspection.batch_id));
-      setBatches((batchRows || []).map((batch) => {
-        const status = certifiedIds.has(batch.batch_id) ? "CERTIFIED" : batch.status === "DELIVERED" ? "DELIVERED" : batch.status === "FLAGGED" ? "FLAGGED" : batch.status === "IN_TRANSIT" ? "IN TRANSIT" : "AWAITING INSPECTION";
-        const stages: TraceBatch["stages"] = status === "CERTIFIED" ? ["complete", "complete", "complete", "complete", "complete"] : status === "IN TRANSIT" ? ["complete", "complete", "complete", "current", "pending"] : ["complete", "complete", "current", "pending", "pending"];
-        return { batchId: batch.batch_id, cropType: batch.crop_type, quantityKg: Number(batch.quantity_kg), region: batch.farm_id || "Farm record", date: batch.registered_at ? new Date(batch.registered_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Unknown", status, stages };
-      }));
-      setIsLoading(false);
+      try {
+        const { batches: batchRows } = await api.get<{
+          batches: Array<{
+            batch_id: string;
+            crop_type: string;
+            quantity_kg: number | string;
+            status: string;
+            registered_at?: string;
+            farm_id?: string | null;
+          }>;
+        }>("/api/batches");
+        const inspectionResults = await Promise.all(
+          batchRows.map(async (batch) => {
+            const { inspections } = await api.get<{
+              inspections: Array<{ certificate_issued?: boolean }>;
+            }>(`/api/inspections?batchId=${encodeURIComponent(batch.batch_id)}`);
+            return {
+              batchId: batch.batch_id,
+              isCertified: inspections.some((inspection) => inspection.certificate_issued),
+            };
+          })
+        );
+        const certifiedIds = new Set(
+          inspectionResults
+            .filter((result) => result.isCertified)
+            .map((result) => result.batchId)
+        );
+        setBatches(batchRows.map((batch) => {
+          const status = certifiedIds.has(batch.batch_id) ? "CERTIFIED" : batch.status === "DELIVERED" ? "DELIVERED" : batch.status === "FLAGGED" ? "FLAGGED" : batch.status === "IN_TRANSIT" ? "IN TRANSIT" : "AWAITING INSPECTION";
+          const stages: TraceBatch["stages"] = status === "CERTIFIED" ? ["complete", "complete", "complete", "complete", "complete"] : status === "IN TRANSIT" ? ["complete", "complete", "complete", "current", "pending"] : ["complete", "complete", "current", "pending", "pending"];
+          return { batchId: batch.batch_id, cropType: batch.crop_type, quantityKg: Number(batch.quantity_kg), region: batch.farm_id || "Farm record", date: batch.registered_at ? new Date(batch.registered_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Unknown", status, stages };
+        }));
+      } finally {
+        setIsLoading(false);
+      }
     }
     loadBatches();
   }, []);
