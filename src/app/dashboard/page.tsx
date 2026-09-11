@@ -328,10 +328,48 @@ function FarmerDashboard() {
 }
 
 function RegulatorDashboard() {
+  const [isLoading, setIsLoading] = useState(true);
+  const [statsData, setStatsData] = useState({
+    compliantBatches: 0,
+    flaggedBatches: 0,
+    activeAlerts: 0,
+    activeFarms: 0,
+  });
+
+  useEffect(() => {
+    async function loadRegulatorStats() {
+      try {
+        const [compliantResult, flaggedResult, alertsResult, farmsResult] = await Promise.all([
+          supabase.from("batches").select("id", { count: "exact", head: true }).eq("status", "CERTIFIED"),
+          supabase.from("batches").select("id", { count: "exact", head: true }).eq("status", "FLAGGED"),
+          supabase.from("alerts").select("id", { count: "exact", head: true }).eq("is_read", false),
+          supabase.from("farms").select("id", { count: "exact", head: true }),
+        ]);
+
+        const queryError = compliantResult.error || flaggedResult.error || alertsResult.error || farmsResult.error;
+        if (queryError) {
+          console.error("Error loading regulator dashboard statistics:", queryError);
+          return;
+        }
+
+        setStatsData({
+          compliantBatches: compliantResult.count || 0,
+          flaggedBatches: flaggedResult.count || 0,
+          activeAlerts: alertsResult.count || 0,
+          activeFarms: farmsResult.count || 0,
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    loadRegulatorStats();
+  }, []);
+
   const stats: StatCardProps[] = [
     {
       icon: CheckCircle2,
-      value: "4,217",
+      value: isLoading ? "-" : String(statsData.compliantBatches),
       label: "Compliant batches",
       iconBg: "bg-accent-green/10",
       iconColor: "text-accent-green",
@@ -341,7 +379,7 @@ function RegulatorDashboard() {
     },
     {
       icon: AlertTriangle,
-      value: "38",
+      value: isLoading ? "-" : String(statsData.flaggedBatches),
       label: "Flagged for review",
       iconBg: "bg-accent-amber/10",
       iconColor: "text-accent-amber",
@@ -351,7 +389,7 @@ function RegulatorDashboard() {
     },
     {
       icon: XCircle,
-      value: "6",
+      value: isLoading ? "-" : String(statsData.activeAlerts),
       label: "Non-compliance alerts",
       iconBg: "bg-accent-red/10",
       iconColor: "text-accent-red",
@@ -361,7 +399,7 @@ function RegulatorDashboard() {
     },
     {
       icon: Globe,
-      value: "1,204",
+      value: isLoading ? "-" : String(statsData.activeFarms),
       label: "Active farms registered",
       iconBg: "bg-accent-blue/10",
       iconColor: "text-accent-blue",
