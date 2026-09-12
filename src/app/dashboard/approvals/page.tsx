@@ -57,33 +57,6 @@ export default function RegulatorApprovalsPage() {
 
   const { isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash: txHash });
 
-  // Role Guard & User Session Check
-  useEffect(() => {
-    async function loadRegulatorSession() {
-      const { data: userData, error: userError } =
-        await supabase.auth.getUser();
-      if (userError || !userData.user) {
-        router.push("/login");
-        return;
-      }
-      setRegulatorUserId(userData.user.id);
-
-      const { data: userProfile } = await supabase
-        .from("users")
-        .select("role")
-        .eq("id", userData.user.id)
-        .single();
-
-      if (userProfile?.role !== "REGULATOR") {
-        router.push("/dashboard");
-        return;
-      }
-
-      fetchPendingApplications();
-    }
-    loadRegulatorSession();
-  }, [router]);
-
   async function fetchPendingApplications() {
     setIsLoading(true);
     try {
@@ -129,6 +102,33 @@ export default function RegulatorApprovalsPage() {
       setIsLoading(false);
     }
   }
+
+  // Role Guard & User Session Check
+  useEffect(() => {
+    async function loadRegulatorSession() {
+      const { data: userData, error: userError } =
+        await supabase.auth.getUser();
+      if (userError || !userData.user) {
+        router.push("/login");
+        return;
+      }
+      setRegulatorUserId(userData.user.id);
+
+      const { data: userProfile } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", userData.user.id)
+        .single();
+
+      if (userProfile?.role !== "REGULATOR") {
+        router.push("/dashboard");
+        return;
+      }
+
+      fetchPendingApplications();
+    }
+    loadRegulatorSession();
+  }, [router]);
 
   // Handle On-Chain Approval Confirmation
   useEffect(() => {
@@ -365,9 +365,8 @@ export default function RegulatorApprovalsPage() {
             return (
               <div
                 key={app.credentialId}
-                className={`rounded-xl glass p-6 transition-all ${
-                  hasNoWallet ? "opacity-70 border-agri-border" : "border-agri-border hover:border-agri-border-focus"
-                }`}
+                className={`rounded-xl glass p-6 transition-all ${hasNoWallet ? "opacity-70 border-agri-border" : "border-agri-border hover:border-agri-border-focus"
+                  }`}
               >
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div className="space-y-1">

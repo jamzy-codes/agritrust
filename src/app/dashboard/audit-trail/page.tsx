@@ -24,6 +24,96 @@ export default function AuditTrailPage() {
   const [totalActions, setTotalActions] = useState<number>(0);
   const [activeWallets, setActiveWallets] = useState<number>(0);
 
+  async function fetchAuditTrail() {
+    setIsLoading(true);
+    try {
+      const [{ data: batches }, { data: inspections }, { data: handoffs }] = await Promise.all([
+        supabase.from("batches").select("batch_id, registered_at, tx_hash, registered_by"),
+        supabase.from("inspections").select("batch_id, inspected_at, tx_hash, inspector_id, certificate_issued"),
+        supabase.from("handoffs").select("batch_id, handed_off_at, tx_hash, distributor_id"),
+      ]);
+
+      const userIds = new Set<string>();
+      batches?.forEach((batch) => batch.registered_by && userIds.add(batch.registered_by));
+      inspections?.forEach((inspection) => inspection.inspector_id && userIds.add(inspection.inspector_id));
+      handoffs?.forEach((handoff) => handoff.distributor_id && userIds.add(handoff.distributor_id));
+
+      const { data: users } = userIds.size
+        ? await supabase.from("users").select("id, full_name, email").in("id", Array.from(userIds))
+        : { data: [] };
+      const userMap = new Map(users?.map((user) => [user.id, user.full_name || user.email || "Registered User"]));
+      const combined: AuditEvent[] = [];
+
+      batches?.forEach((batch) => {
+        const rawTimestamp = batch.registered_at ? new Date(batch.registered_at).getTime() : Date.now();
+        combined.push({
+          id: `reg-${batch.batch_id}`,
+          hash: batch.tx_hash,
+          type: "REGISTRATION",
+          typeTone: "bg-accent-green/20 text-accent-green border-accent-green/30",
+          batch: batch.batch_id,
+          actor: batch.registered_by ? userMap.get(batch.registered_by) || "Farmer" : "Farmer",
+          timestamp: batch.registered_at || "Recently",
+          rawTimestamp,
+          status: "CONFIRMED",
+        });
+      });
+
+      inspections?.forEach((inspection) => {
+        const rawTimestamp = inspection.inspected_at ? new Date(inspection.inspected_at).getTime() : Date.now();
+        const actor = inspection.inspector_id ? userMap.get(inspection.inspector_id) || "Inspector" : "Inspector";
+        combined.push({
+          id: `insp-${inspection.batch_id}-${rawTimestamp}`,
+          hash: inspection.tx_hash,
+          type: "INSPECTION",
+          typeTone: "bg-accent-blue/20 text-accent-blue border-accent-blue/30",
+          batch: inspection.batch_id,
+          actor,
+          timestamp: inspection.inspected_at || "Recently",
+          rawTimestamp,
+          status: "CONFIRMED",
+        });
+        if (inspection.certificate_issued) {
+          combined.push({
+            id: `cert-${inspection.batch_id}-${rawTimestamp}`,
+            hash: inspection.tx_hash,
+            type: "CERTIFICATION",
+            typeTone: "bg-accent-purple/20 text-accent-purple border-accent-purple/30",
+            batch: inspection.batch_id,
+            actor,
+            timestamp: inspection.inspected_at || "Recently",
+            rawTimestamp: rawTimestamp + 1,
+            status: "CONFIRMED",
+          });
+        }
+      });
+
+      handoffs?.forEach((handoff) => {
+        const rawTimestamp = handoff.handed_off_at ? new Date(handoff.handed_off_at).getTime() : Date.now();
+        combined.push({
+          id: `handoff-${handoff.batch_id}-${rawTimestamp}`,
+          hash: handoff.tx_hash,
+          type: "HANDOFF",
+          typeTone: "bg-accent-amber/20 text-accent-amber border-accent-amber/30",
+          batch: handoff.batch_id,
+          actor: handoff.distributor_id ? userMap.get(handoff.distributor_id) || "Distributor" : "Distributor",
+          timestamp: handoff.handed_off_at || "Recently",
+          rawTimestamp,
+          status: "CONFIRMED",
+        });
+      });
+
+      combined.sort((first, second) => second.rawTimestamp - first.rawTimestamp);
+      setEvents(combined);
+      setTotalActions(combined.length);
+      setActiveWallets(userIds.size || (users?.length ?? 0));
+    } catch (err) {
+      console.error("Error fetching audit trail events:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   // REGULATOR Role Guard & Data Fetching
   useEffect(() => {
     async function loadAndVerifyRegulator() {
@@ -51,153 +141,6 @@ export default function AuditTrailPage() {
     }
     loadAndVerifyRegulator();
   }, [router]);
-
-  async function fetchAuditTrail() {
-    setIsLoading(true);
-    try {
-      // 1. Fetch Batches (Registrations)
-      const { data: batches } = await supabase
-        .from("batches")
-        .select("batch_id, crop_type, registered_at, tx_hash, registered_by");
-
-      // 2. Fetch Inspections
-      const { data: inspections } = await supabase
-        .from("inspections")
-        .select("batch_id, quality_grade, inspected_at, tx_hash, inspector_id, certificate_issued");
-
-      // 3. Fetch Handoffs
-      const { data: handoffs } = await supabase
-        .from("handoffs")
-        .select("batch_id, location, handed_off_at, tx_hash, distributor_id");
-
-      // Gather all user IDs to fetch names
-      const userIds = new Set<string>();
-      batches?.forEach((b) => b.registered_by && userIds.add(b.registered_by));
-      inspections?.forEach((i) => i.inspector_id && userIds.add(i.inspector_id));
-      handoffs?.forEach((h) => h.distributor_id && userIds.add(h.distributor_id));
-
-      const { data: users } = userIds.size > 0
-        ? await supabase
-            .from("users")
-            .select("id, full_name, email, role, wallet_address")
-            .in("id", Array.from(userIds))
-        : { data: [] };
-
-      const userMap = new Map(users?.map((u) => [u.id, u.full_name || u.email || "Registered User"]));
-
-      const combined: AuditEvent[] = [];
-
-      // Process batch registration events
-      batches?.forEach((b) => {
-        const actorName = b.registered_by ? userMap.get(b.registered_by) || "Farmer" : "Farmer";
-        const ts = b.registered_at ? new Date(b.registered_at).getTime() : Date.now();
-        combined.push({
-          id: `reg-${b.batch_id}`,
-          hash: b.tx_hash,
-          type: "REGISTRATION",
-          typeTone: "bg-accent-green/20 text-accent-green border-accent-green/30",
-          batch: b.batch_id,
-          actor: actorName,
-          timestamp: b.registered_at
-            ? new Date(b.registered_at).toLocaleString("en-US", {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })
-            : "Recently",
-          rawTimestamp: ts,
-          status: "CONFIRMED",
-        });
-      });
-
-      // Process inspection & certification events
-      inspections?.forEach((i) => {
-        const actorName = i.inspector_id ? userMap.get(i.inspector_id) || "Inspector" : "Inspector";
-        const ts = i.inspected_at ? new Date(i.inspected_at).getTime() : Date.now();
-
-        combined.push({
-          id: `insp-${i.batch_id}-${ts}`,
-          hash: i.tx_hash,
-          type: "INSPECTION",
-          typeTone: "bg-accent-blue/20 text-accent-blue border-accent-blue/30",
-          batch: i.batch_id,
-          actor: actorName,
-          timestamp: i.inspected_at
-            ? new Date(i.inspected_at).toLocaleString("en-US", {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })
-            : "Recently",
-          rawTimestamp: ts,
-          status: "CONFIRMED",
-        });
-
-        if (i.certificate_issued) {
-          combined.push({
-            id: `cert-${i.batch_id}-${ts}`,
-            hash: i.tx_hash,
-            type: "CERTIFICATION",
-            typeTone: "bg-accent-purple/20 text-accent-purple border-accent-purple/30",
-            batch: i.batch_id,
-            actor: actorName,
-            timestamp: i.inspected_at
-              ? new Date(i.inspected_at).toLocaleString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })
-              : "Recently",
-            rawTimestamp: ts + 1,
-            status: "CONFIRMED",
-          });
-        }
-      });
-
-      // Process handoff events
-      handoffs?.forEach((h) => {
-        const actorName = h.distributor_id ? userMap.get(h.distributor_id) || "Distributor" : "Distributor";
-        const ts = h.handed_off_at ? new Date(h.handed_off_at).getTime() : Date.now();
-
-        combined.push({
-          id: `handoff-${h.batch_id}-${ts}`,
-          hash: h.tx_hash,
-          type: "HANDOFF",
-          typeTone: "bg-accent-amber/20 text-accent-amber border-accent-amber/30",
-          batch: h.batch_id,
-          actor: actorName,
-          timestamp: h.handed_off_at
-            ? new Date(h.handed_off_at).toLocaleString("en-US", {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })
-            : "Recently",
-          rawTimestamp: ts,
-          status: "CONFIRMED",
-        });
-      });
-
-      // Sort descending by rawTimestamp (most recent first)
-      combined.sort((a, b) => b.rawTimestamp - a.rawTimestamp);
-
-      setEvents(combined);
-      setTotalActions(combined.length);
-      setActiveWallets(userIds.size || (users?.length ?? 0));
-    } catch (err) {
-      console.error("Error fetching audit trail events:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  }
 
   const stats = [
     { value: totalActions.toLocaleString(), label: "Total on-chain transactions" },
