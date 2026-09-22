@@ -17,6 +17,13 @@ interface AuditEvent {
   status: string;
 }
 
+function toSafeTimestamp(value: string | null | undefined): number {
+  if (!value) return 0;
+
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 export default function AuditTrailPage() {
   const router = useRouter();
   const [events, setEvents] = useState<AuditEvent[]>([]);
@@ -45,7 +52,7 @@ export default function AuditTrailPage() {
       const combined: AuditEvent[] = [];
 
       batches?.forEach((batch) => {
-        const rawTimestamp = batch.registered_at ? new Date(batch.registered_at).getTime() : Date.now();
+        const rawTimestamp = toSafeTimestamp(batch.registered_at);
         combined.push({
           id: `reg-${batch.batch_id}`,
           hash: batch.tx_hash,
@@ -53,14 +60,14 @@ export default function AuditTrailPage() {
           typeTone: "bg-accent-green/20 text-accent-green border-accent-green/30",
           batch: batch.batch_id,
           actor: batch.registered_by ? userMap.get(batch.registered_by) || "Farmer" : "Farmer",
-          timestamp: batch.registered_at || "Recently",
+          timestamp: batch.registered_at || "Pending timestamp",
           rawTimestamp,
           status: "CONFIRMED",
         });
       });
 
       inspections?.forEach((inspection) => {
-        const rawTimestamp = inspection.inspected_at ? new Date(inspection.inspected_at).getTime() : Date.now();
+        const rawTimestamp = toSafeTimestamp(inspection.inspected_at);
         const actor = inspection.inspector_id ? userMap.get(inspection.inspector_id) || "Inspector" : "Inspector";
         combined.push({
           id: `insp-${inspection.batch_id}-${rawTimestamp}`,
@@ -69,7 +76,7 @@ export default function AuditTrailPage() {
           typeTone: "bg-accent-blue/20 text-accent-blue border-accent-blue/30",
           batch: inspection.batch_id,
           actor,
-          timestamp: inspection.inspected_at || "Recently",
+          timestamp: inspection.inspected_at || "Pending timestamp",
           rawTimestamp,
           status: "CONFIRMED",
         });
@@ -81,7 +88,7 @@ export default function AuditTrailPage() {
             typeTone: "bg-accent-purple/20 text-accent-purple border-accent-purple/30",
             batch: inspection.batch_id,
             actor,
-            timestamp: inspection.inspected_at || "Recently",
+            timestamp: inspection.inspected_at || "Pending timestamp",
             rawTimestamp: rawTimestamp + 1,
             status: "CONFIRMED",
           });
@@ -89,7 +96,7 @@ export default function AuditTrailPage() {
       });
 
       handoffs?.forEach((handoff) => {
-        const rawTimestamp = handoff.handed_off_at ? new Date(handoff.handed_off_at).getTime() : Date.now();
+        const rawTimestamp = toSafeTimestamp(handoff.handed_off_at);
         combined.push({
           id: `handoff-${handoff.batch_id}-${rawTimestamp}`,
           hash: handoff.tx_hash,
@@ -97,7 +104,7 @@ export default function AuditTrailPage() {
           typeTone: "bg-accent-amber/20 text-accent-amber border-accent-amber/30",
           batch: handoff.batch_id,
           actor: handoff.distributor_id ? userMap.get(handoff.distributor_id) || "Distributor" : "Distributor",
-          timestamp: handoff.handed_off_at || "Recently",
+          timestamp: handoff.handed_off_at || "Pending timestamp",
           rawTimestamp,
           status: "CONFIRMED",
         });
