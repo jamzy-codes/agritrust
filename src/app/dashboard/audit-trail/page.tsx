@@ -172,7 +172,7 @@ export default function AuditTrailPage() {
         {stats.map((stat) => (
           <div
             key={stat.label}
-            className="rounded-lg border border-agri-border bg-agri-surface px-4 py-3 min-w-[200px]"
+            className="rounded-lg border border-agri-border bg-agri-surface px-4 py-3 min-w-12.5px"
           >
             <p className="text-lg font-bold text-agri-text">{stat.value}</p>
             <p className="text-sm text-agri-muted">{stat.label}</p>

@@ -411,7 +411,7 @@ export default function OnboardingPage() {
           {!isConnected ? (
             <div className="mt-6 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
               <div className="flex items-start gap-3">
-                <Wallet className="mt-0.5 h-5 w-5 flex-shrink-0 text-accent-amber" />
+                <Wallet className="mt-0.5 h-5 w-5 shrink-0 text-accent-amber" />
                 <div className="flex-1">
                   <h4 className="text-sm font-semibold text-agri-text">Wallet Connection Required</h4>
                   <p className="mt-1 text-xs text-agri-muted">
@@ -580,7 +580,7 @@ export default function OnboardingPage() {
 
           {isResubmission ? (
             <div className="mt-4 flex items-start gap-3 rounded-xl border border-accent-amber/40 bg-accent-amber/10 p-4 text-accent-amber">
-              <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-accent-amber" />
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-accent-amber" />
               <div className="text-xs">
                 <p className="font-semibold">Application Resubmission</p>
                 <p className="mt-0.5 text-agri-muted">
@@ -599,7 +599,7 @@ export default function OnboardingPage() {
           {!isConnected ? (
             <div className="mt-6 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
               <div className="flex items-start gap-3">
-                <Wallet className="mt-0.5 h-5 w-5 flex-shrink-0 text-accent-amber" />
+                <Wallet className="mt-0.5 h-5 w-5 shrink-0 text-accent-amber" />
                 <div className="flex-1">
                   <h4 className="text-sm font-semibold text-agri-text">Wallet Connection Required</h4>
                   <p className="mt-1 text-xs text-agri-muted">

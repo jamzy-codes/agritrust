@@ -131,7 +131,7 @@ export default function AlertsPage() {
                 className="flex items-start gap-4 rounded-xl border border-agri-border bg-agri-surface p-4 transition-all hover:border-agri-border-focus"
               >
                 <div
-                  className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full ${iconStyles}`}
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${iconStyles}`}
                 >
                   <Icon className="h-5 w-5" />
                 </div>
@@ -146,7 +146,7 @@ export default function AlertsPage() {
                 </div>
                 <Link
                   href={alert.href}
-                  className="flex-shrink-0 text-xs font-medium text-accent-blue hover:underline"
+                  className="shrink-0 text-xs font-medium text-accent-blue hover:underline"
                 >
                   Review →
                 </Link>

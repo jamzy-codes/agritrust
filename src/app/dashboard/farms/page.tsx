@@ -71,7 +71,7 @@ export default function FarmsPage() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-[400px] items-center justify-center p-8">
+      <div className="flex min-h-100px items-center justify-center p-8">
         <p className="text-sm text-agri-muted">Loading farm profile...</p>
       </div>
     );
@@ -101,7 +101,7 @@ export default function FarmsPage() {
                 key={farm.id}
                 className="rounded-xl border border-agri-border bg-agri-surface p-5"
               >
-                <div className="relative mb-4 h-24 overflow-hidden rounded-xl border border-agri-border bg-gradient-to-br from-accent-green/20 to-agri-raised">
+                <div className="relative mb-4 h-24 overflow-hidden rounded-xl border border-agri-border bg-linear-to-br from-accent-green/20 to-agri-raised">
                   <div className="flex h-full items-center justify-center">
                     <Sprout className="h-10 w-10 text-accent-green/40" />
                   </div>
@@ -137,7 +137,7 @@ export default function FarmsPage() {
         )
       ) : farmerFarm ? (
         <div className="mx-8 rounded-xl border border-agri-border bg-agri-surface p-6">
-          <div className="relative mb-5 h-40 overflow-hidden rounded-xl border border-agri-border bg-gradient-to-br from-accent-green/20 to-agri-raised">
+          <div className="relative mb-5 h-40 overflow-hidden rounded-xl border border-agri-border bg-linear-to-br from-accent-green/20 to-agri-raised">
             <div className="flex h-full items-center justify-center">
               <Sprout className="h-12 w-12 text-accent-green/40" />
             </div>

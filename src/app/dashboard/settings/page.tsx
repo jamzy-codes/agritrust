@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAccount, useDisconnect } from "wagmi";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import {
@@ -16,12 +18,12 @@ import {
   MapPin,
   QrCode,
   Save,
-  Settings2,
   Shield,
   User,
   Wallet,
   X,
   ExternalLink,
+  LogOut,
   Unlink,
 } from "lucide-react";
 
@@ -46,6 +48,12 @@ interface CredentialState {
   status: string;
 }
 
+interface QrBatch {
+  batchId: string;
+  cropType: string;
+  status: string;
+}
+
 const availableCrops = [
   "Cocoa",
   "Cassava",
@@ -59,20 +67,15 @@ const availableCrops = [
   "Groundnut",
 ];
 
-function SectionPlaceholder({ title }: { title: string }) {
-  return (
-    <div className="rounded-xl border border-agri-border bg-agri-surface p-12 text-center">
-      <Settings2 className="mx-auto mb-4 h-12 w-12 text-agri-muted" />
-      <p className="text-agri-muted">{title} settings coming soon.</p>
-    </div>
-  );
-}
-
 export default function SettingsPage() {
+  const router = useRouter();
   const [activeSection, setActiveSection] = useState<SectionKey>("profile");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [updatingWallet, setUpdatingWallet] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const [qrBatches, setQrBatches] = useState<QrBatch[]>([]);
 
   // User state
   const [userProfile, setUserProfile] = useState<UserProfileState | null>(null);
@@ -167,6 +170,17 @@ export default function SettingsPage() {
             if (farm.primary_crops && Array.isArray(farm.primary_crops)) {
               setCrops(farm.primary_crops);
             }
+
+            const { batches } = await api.get<{
+              batches: Array<{ batch_id: string; crop_type: string; status: string }>;
+            }>(`/api/batches?farmId=${encodeURIComponent(farm.id)}`);
+            setQrBatches(
+              batches.map((batch) => ({
+                batchId: batch.batch_id,
+                cropType: batch.crop_type,
+                status: batch.status,
+              })),
+            );
           }
         }
       }
@@ -212,6 +226,7 @@ export default function SettingsPage() {
 
   const saveProfileChanges = async () => {
     setSaveStatus("saving");
+    setSaveError(null);
     try {
       if (userProfile && ownerName.trim()) {
         await api.patch(`/api/users/${userProfile.id}`, {
@@ -239,12 +254,13 @@ export default function SettingsPage() {
           setFarmId(response.farm.id);
         }
       }
+      setSaveStatus("saved");
+      window.setTimeout(() => setSaveStatus("idle"), 2000);
     } catch (e) {
       console.error("Error saving profile settings:", e);
+      setSaveError(e instanceof Error ? e.message : "Unable to save your profile. Please try again.");
+      setSaveStatus("idle");
     }
-
-    setSaveStatus("saved");
-    window.setTimeout(() => setSaveStatus("idle"), 2000);
   };
 
   const handleUpdateWalletToConnected = async () => {
@@ -263,9 +279,24 @@ export default function SettingsPage() {
   };
 
   const copyWalletAddress = (addr: string) => {
-    navigator.clipboard.writeText(addr);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    void navigator.clipboard.writeText(addr).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const copyVerificationLink = (batchId: string) => {
+    const link = `${window.location.origin}/verify/${encodeURIComponent(batchId)}`;
+    void navigator.clipboard.writeText(link).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const signOut = async () => {
+    setIsSigningOut(true);
+    await supabase.auth.signOut();
+    router.replace("/login");
   };
 
   const dbWallet = userProfile?.walletAddress;
@@ -618,6 +649,11 @@ export default function SettingsPage() {
                     )}
                   </button>
                 </div>
+                {saveError ? (
+                  <p className="mt-3 text-right text-sm text-accent-red" role="alert">
+                    {saveError}
+                  </p>
+                ) : null}
               </div>
 
               {/* Embedded Wallet Section in Profile */}
@@ -885,11 +921,73 @@ export default function SettingsPage() {
           )}
 
           {activeSection === "qr" && role === "FARMER" && (
-            <SectionPlaceholder title="QR Codes" />
+            <div>
+              <h2 className="mb-2 text-xl font-bold text-agri-text">Batch verification links</h2>
+              <p className="mb-6 text-sm text-agri-muted">
+                Share these public links with buyers or print them beside the corresponding batch QR code.
+              </p>
+              <div className="overflow-hidden rounded-xl border border-agri-border bg-agri-surface">
+                {qrBatches.length === 0 ? (
+                  <div className="p-10 text-center">
+                    <QrCode className="mx-auto mb-3 h-10 w-10 text-agri-muted" />
+                    <p className="text-sm text-agri-muted">Register a batch to create a public verification link.</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-agri-border">
+                    {qrBatches.map((batch) => (
+                      <div key={batch.batchId} className="flex items-center justify-between gap-4 p-4">
+                        <div className="min-w-0">
+                          <p className="font-mono text-sm font-semibold text-accent-cyan">{batch.batchId}</p>
+                          <p className="mt-1 text-xs text-agri-muted">{batch.cropType} · {batch.status}</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => copyVerificationLink(batch.batchId)}
+                            className="flex items-center gap-1.5 rounded-lg border border-agri-border bg-agri-raised px-3 py-2 text-xs text-agri-text hover:bg-agri-overlay"
+                          >
+                            {copied ? <Check className="h-3.5 w-3.5 text-accent-green" /> : <Copy className="h-3.5 w-3.5" />}
+                            {copied ? "Copied" : "Copy link"}
+                          </button>
+                          <Link
+                            href={`/verify/${encodeURIComponent(batch.batchId)}`}
+                            target="_blank"
+                            className="flex items-center gap-1.5 rounded-lg bg-accent-blue px-3 py-2 text-xs font-medium text-white hover:bg-accent-blue/90"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            Open
+                          </Link>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           )}
 
           {activeSection === "danger" && (
-            <SectionPlaceholder title="Danger Zone" />
+            <div>
+              <h2 className="mb-2 text-xl font-bold text-agri-text">Account actions</h2>
+              <p className="mb-6 text-sm text-agri-muted">Manage access to this browser session.</p>
+              <div className="rounded-xl border border-accent-red/30 bg-agri-surface p-6">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <h3 className="font-semibold text-agri-text">Sign out of this device</h3>
+                    <p className="mt-1 text-sm text-agri-muted">Your account and registered batches remain unchanged.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={signOut}
+                    disabled={isSigningOut}
+                    className="flex items-center gap-2 rounded-lg bg-accent-red px-4 py-2.5 text-sm font-medium text-white hover:bg-accent-red/90 disabled:opacity-60"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    {isSigningOut ? "Signing out..." : "Sign out"}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>
