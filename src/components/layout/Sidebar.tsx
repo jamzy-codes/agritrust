@@ -22,6 +22,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 
+import { DASHBOARD_ROUTE_ACCESS } from "@/lib/route-access";
 import type { UserRole } from "@/types";
 
 interface SidebarProps {
@@ -81,23 +82,6 @@ const navItems: Array<{ icon: LucideIcon; label: string; route: string }> = [
   { icon: Settings, label: "Settings", route: "/dashboard/settings" },
 ];
 
-const navAccess: Record<string, UserRole[]> = {
-  "/dashboard": ["FARMER", "INSPECTOR", "DISTRIBUTOR", "REGULATOR"],
-  "/dashboard/approvals": ["REGULATOR"],
-  "/dashboard/batches": ["FARMER", "INSPECTOR", "DISTRIBUTOR", "REGULATOR"],
-  "/dashboard/farms": ["FARMER", "INSPECTOR", "REGULATOR"],
-  "/dashboard/trace": ["FARMER", "INSPECTOR", "DISTRIBUTOR", "REGULATOR"],
-  "/dashboard/register": ["FARMER", "INSPECTOR", "DISTRIBUTOR"],
-  "/dashboard/compliance": ["FARMER", "INSPECTOR", "REGULATOR"],
-  "/dashboard/analytics": ["FARMER", "REGULATOR"],
-  "/dashboard/alerts": ["FARMER", "INSPECTOR", "DISTRIBUTOR", "REGULATOR"],
-  "/dashboard/reports": ["FARMER", "INSPECTOR", "DISTRIBUTOR", "REGULATOR"],
-  "/dashboard/audit-trail": ["REGULATOR"],
-  "/dashboard/smart-contracts": ["REGULATOR"],
-  "/dashboard/integrations": ["REGULATOR"],
-  "/dashboard/settings": ["FARMER", "INSPECTOR", "DISTRIBUTOR", "REGULATOR"],
-};
-
 const DEFAULT_ROLE: UserRole = "FARMER";
 
 export default function Sidebar({
@@ -110,26 +94,23 @@ export default function Sidebar({
   const styles = roleStyles[resolvedRole];
   const isExpanded = isMobileOpen || isHovered;
   const visibleNavItems = navItems.filter(({ route }) =>
-    navAccess[route].includes(resolvedRole),
+    DASHBOARD_ROUTE_ACCESS[route].includes(resolvedRole),
   );
 
   return (
     <aside
-      className={`fixed bottom-0 left-0 top-16 z-50 flex flex-col overflow-y-auto border-r border-agri-border border-white/5 bg-agri-surface transition-[width,transform] duration-300 ease-out ${
-        isExpanded ? "w-[260px]" : "w-14"
-      } ${
-        isMobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
-      }`}
+      className={`fixed bottom-0 left-0 top-16 z-50 flex flex-col overflow-y-auto border-r border-white/5 border-white/5 bg-agri-surface transition-[width,transform] duration-300 ease-out ${isExpanded ? "w-65px" : "w-14"
+        } ${isMobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+        }`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
       <nav className="flex-1 px-2 py-4">
         <p
-          className={`text-[10px] font-bold uppercase tracking-widest text-agri-muted transition-opacity duration-200 ${
-            isExpanded
+          className={`text-[10px] font-bold uppercase tracking-widest text-agri-muted transition-opacity duration-200 ${isExpanded
               ? "mb-2 px-3 opacity-100"
               : "h-0 overflow-hidden opacity-0"
-          }`}
+            }`}
         >
           MAIN
         </p>
@@ -151,17 +132,15 @@ export default function Sidebar({
               href={route}
               aria-label={label}
               title={isExpanded ? undefined : label}
-              className={`flex items-center rounded-lg text-sm transition-all duration-150 ${
-                isExpanded
+              className={`flex items-center rounded-lg text-sm transition-all duration-150 ${isExpanded
                   ? `gap-3 px-3 py-2.5 ${stateClassName}`
                   : `mx-auto h-9 w-9 justify-center ${collapsedStateClassName}`
-              }`}
-            >
-              <Icon className="h-5 w-5 flex-shrink-0" />
-              <span
-                className={`whitespace-nowrap transition-opacity duration-200 ${
-                  isExpanded ? "opacity-100" : "w-0 overflow-hidden opacity-0"
                 }`}
+            >
+              <Icon className="h-5 w-5 shrink-0" />
+              <span
+                className={`whitespace-nowrap transition-opacity duration-200 ${isExpanded ? "opacity-100" : "w-0 overflow-hidden opacity-0"
+                  }`}
               >
                 {label}
               </span>
@@ -173,18 +152,16 @@ export default function Sidebar({
       <div className="border-t border-agri-border p-2">
         <Link
           href="/login"
-          className={`flex cursor-pointer items-center rounded-lg text-sm text-agri-muted hover:bg-accent-red/10 hover:text-accent-red hover:shadow-[0_0_12px_rgba(239,68,68,0.2)] ${
-            isExpanded
+          className={`flex cursor-pointer items-center rounded-lg text-sm text-agri-muted hover:bg-accent-red/10 hover:text-accent-red hover:shadow-[0_0_12px_rgba(239,68,68,0.2)] ${isExpanded
               ? "gap-3 px-3 py-2.5"
               : "mx-auto h-9 w-9 justify-center"
-          }`}
+            }`}
           title={isExpanded ? undefined : "Logout"}
         >
-          <LogOut className="h-5 w-5 flex-shrink-0" />
+          <LogOut className="h-5 w-5 shrink-0" />
           <span
-            className={`whitespace-nowrap transition-opacity duration-200 ${
-              isExpanded ? "opacity-100" : "w-0 overflow-hidden opacity-0"
-            }`}
+            className={`whitespace-nowrap transition-opacity duration-200 ${isExpanded ? "opacity-100" : "w-0 overflow-hidden opacity-0"
+              }`}
           >
             Logout
           </span>

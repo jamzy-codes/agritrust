@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { Clock, LogOut } from "lucide-react";
 
 import Sidebar from "@/components/layout/Sidebar";
 import TopBar from "@/components/layout/TopBar";
+import { canAccessRoute } from "@/lib/route-access";
 import { supabase } from "@/lib/supabase";
 import type { UserRole } from "@/types";
 
@@ -28,6 +29,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [isPending, setIsPending] = useState(false);
@@ -67,10 +69,12 @@ export default function DashboardLayout({
 
       const name = profile.full_name || profile.email || "User";
 
+      const userRole = profile.role as UserRole;
+
       setCurrentUser({
         userName: name,
         email: profile.email ?? "",
-        role: profile.role as UserRole,
+        role: userRole,
         initials: getInitials(name),
       });
       setIsLoading(false);
@@ -78,6 +82,12 @@ export default function DashboardLayout({
 
     loadUser();
   }, [router]);
+
+  useEffect(() => {
+    if (!isLoading && currentUser && !canAccessRoute(pathname, currentUser.role)) {
+      router.push("/dashboard");
+    }
+  }, [currentUser, isLoading, pathname, router]);
 
   if (isLoading) {
     return (
@@ -128,7 +138,7 @@ export default function DashboardLayout({
   return (
     <div className="relative min-h-screen bg-agri-base">
       <div className="fixed inset-0 -z-10 bg-agri-base">
-        <div className="absolute top-0 left-[260px] right-0 h-125px hero-gradient opacity-60 pointer-events-none" />
+        <div className="absolute top-0 left-65px right-0 h-125px hero-gradient opacity-60 pointer-events-none" />
       </div>
       <Sidebar role={currentUser?.role} isMobileOpen={isMobileOpen} />
       {isMobileOpen && (

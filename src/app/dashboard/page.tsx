@@ -33,6 +33,7 @@ import type { UserRole } from "@/types";
 import { MiniTimeline } from "@/components/ui/MiniTimeline";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { fetchRealAlerts, type RealAlert } from "@/lib/alerts";
 import { supabase } from "@/lib/supabase";
 
 
@@ -335,29 +336,32 @@ function RegulatorDashboard() {
     activeAlerts: 0,
     activeFarms: 0,
   });
+  const [recentAlerts, setRecentAlerts] = useState<RealAlert[]>([]);
 
   useEffect(() => {
     async function loadRegulatorStats() {
       try {
-        const [compliantResult, flaggedResult, alertsResult, farmsResult] = await Promise.all([
+        const [compliantResult, flaggedResult, farmsResult] = await Promise.all([
           supabase.from("batches").select("id", { count: "exact", head: true }).eq("status", "CERTIFIED"),
           supabase.from("batches").select("id", { count: "exact", head: true }).eq("status", "FLAGGED"),
-          supabase.from("alerts").select("id", { count: "exact", head: true }).eq("is_read", false),
           supabase.from("farms").select("id", { count: "exact", head: true }),
         ]);
 
-        const queryError = compliantResult.error || flaggedResult.error || alertsResult.error || farmsResult.error;
+        const queryError = compliantResult.error || flaggedResult.error || farmsResult.error;
         if (queryError) {
           console.error("Error loading regulator dashboard statistics:", queryError);
           return;
         }
 
+        const liveAlerts = await fetchRealAlerts("REGULATOR");
+
         setStatsData({
           compliantBatches: compliantResult.count || 0,
           flaggedBatches: flaggedResult.count || 0,
-          activeAlerts: alertsResult.count || 0,
+          activeAlerts: liveAlerts.length,
           activeFarms: farmsResult.count || 0,
         });
+        setRecentAlerts(liveAlerts.slice(0, 4));
       } finally {
         setIsLoading(false);
       }
@@ -499,23 +503,34 @@ function RegulatorDashboard() {
         <GradientCard>
           <div className="p-5">
             <h3 className="mb-4 text-base font-semibold text-agri-text">Recent compliance alerts</h3>
-            {[
-              ["bg-accent-red", "Batch AGT-1103 flagged: GMO disclosure missing", "GreenFields Farms, Kaduna"],
-              ["bg-accent-amber", "Farm ID #0892 inspection overdue", "Sunrise Agro Ltd., Oyo State"],
-              ["bg-accent-red", "Batch AGT-0987 failed residue test (Chlorpyrifos)", "Ife Agri Cooperative, Edo"],
-              ["bg-accent-amber", "Incomplete documentation for Batch AGT-1044", "Niger Delta Rice Farms, Rivers"],
-            ].map(([dot, alert, meta]) => (
-              <div key={alert} className="flex items-start gap-3 border-b border-agri-border py-3 last:border-0">
-                <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`} />
-                <div>
-                  <p className="text-sm font-medium text-agri-text">{alert}</p>
-                  <p className="text-xs text-agri-muted">{meta}</p>
-                </div>
-                <Link className="ml-auto shrink-0 text-xs text-accent-blue" href="/dashboard/compliance">
-                  Review
-                </Link>
+            {recentAlerts.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-agri-border bg-agri-raised/60 p-4 text-sm text-agri-muted">
+                No live compliance alerts at the moment.
               </div>
-            ))}
+            ) : (
+              recentAlerts.map((alert) => {
+                const dotClass =
+                  alert.type === "critical"
+                    ? "bg-accent-red"
+                    : alert.type === "warning"
+                      ? "bg-accent-amber"
+                      : "bg-accent-blue";
+
+                return (
+                  <div key={alert.id} className="flex items-start gap-3 border-b border-agri-border py-3 last:border-0">
+                    <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dotClass}`} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-agri-text">{alert.title}</p>
+                      <p className="text-xs text-agri-muted">{alert.description}</p>
+                      <p className="mt-1 text-[10px] uppercase tracking-wide text-agri-muted/80">{alert.time}</p>
+                    </div>
+                    <Link className="ml-auto shrink-0 text-xs text-accent-blue" href={alert.href}>
+                      Review
+                    </Link>
+                  </div>
+                );
+              })
+            )}
           </div>
         </GradientCard>
 
