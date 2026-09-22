@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { buildAuditLogPayload, normalizeAuditLogRecord } from "@/lib/data-model";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function GET(request: NextRequest) {
@@ -36,10 +37,11 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const actorId = body.actorId ?? body.actor_id;
-    const entityType = body.entityType ?? body.entity_type;
-    const entityId = body.entityId ?? body.entity_id;
-    const action = body.action;
+    const normalized = normalizeAuditLogRecord(body);
+    const actorId = normalized.actor_id;
+    const entityType = normalized.entity_type;
+    const entityId = normalized.entity_id;
+    const action = normalized.action;
 
     if (!entityType || !entityId || !action) {
       return NextResponse.json(
@@ -49,11 +51,11 @@ export async function POST(request: NextRequest) {
     }
 
     const payload = {
+      ...buildAuditLogPayload(body),
       actor_id: actorId ?? null,
       entity_type: entityType,
       entity_id: entityId,
       action,
-      details_json: body.details ?? body.details_json ?? {},
     };
 
     const { data, error } = await supabaseAdmin.from("audit_logs").insert(payload).select().single();

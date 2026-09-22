@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { buildCertificatePayload, normalizeCertificateRecord } from "@/lib/data-model";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function GET(request: NextRequest) {
@@ -30,8 +31,9 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const batchId = body.batchId ?? body.batch_id;
-    const inspectorId = body.inspectorId ?? body.inspector_id;
+    const normalized = normalizeCertificateRecord(body);
+    const batchId = normalized.batch_id;
+    const inspectorId = normalized.inspector_id;
 
     if (!batchId || !inspectorId) {
       return NextResponse.json(
@@ -41,13 +43,9 @@ export async function POST(request: NextRequest) {
     }
 
     const payload = {
+      ...buildCertificatePayload(body),
       batch_id: batchId,
       inspector_id: inspectorId,
-      certificate_number: body.certificateNumber ?? body.certificate_number,
-      status: body.status ?? "ACTIVE",
-      issued_at: body.issuedAt ?? body.issued_at ?? new Date().toISOString(),
-      expires_at: body.expiresAt ?? body.expires_at ?? null,
-      revoked_at: body.revokedAt ?? body.revoked_at ?? null,
     };
 
     if (!payload.certificate_number) {
