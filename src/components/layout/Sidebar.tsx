@@ -99,7 +99,7 @@ export default function Sidebar({
 
   return (
     <aside
-      className={`fixed bottom-0 left-0 top-16 z-50 flex flex-col overflow-y-auto border-r border-white/5 border-white/5 bg-agri-surface transition-[width,transform] duration-300 ease-out ${isExpanded ? "w-65px" : "w-14"
+      className={`fixed bottom-0 left-0 top-16 z-50 flex flex-col overflow-y-auto border-r border-white/5  bg-agri-surface transition-[width,transform] duration-300 ease-out ${isExpanded ? "w-65px" : "w-14"
         } ${isMobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         }`}
       onMouseEnter={() => setIsHovered(true)}

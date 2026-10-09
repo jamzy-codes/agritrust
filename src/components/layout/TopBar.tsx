@@ -127,7 +127,7 @@ export default function TopBar({
         />
       )}
 
-      <header className="fixed left-0 right-0 top-0 z-30 flex h-16 items-center gap-4 border-b border-agri-border border-white/5 bg-agri-surface/85 px-6 shadow-[0_12px_40px_rgba(0,0,0,0.18)] backdrop-blur-xl">
+      <header className="fixed left-0 right-0 top-0 z-30 flex h-16 items-center gap-4 border-b  border-white/5 bg-agri-surface/85 px-6 shadow-[0_12px_40px_rgba(0,0,0,0.18)] backdrop-blur-xl">
         <button
           type="button"
           className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-agri-muted hover:bg-agri-raised hover:text-agri-text lg:hidden"
@@ -163,7 +163,7 @@ export default function TopBar({
             >
               <Bell className="h-5 w-5 text-agri-muted hover:text-agri-text" />
               {unreadCount > 0 && (
-                <span className="absolute right-0 top-0 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-accent-red px-1 text-[10px] font-bold text-white shadow-sm animate-pulse">
+                <span className="absolute right-0 top-0 flex h-4 min-w-4px items-center justify-center rounded-full bg-accent-red px-1 text-[10px] font-bold text-white shadow-sm animate-pulse">
                   {unreadCount > 9 ? "9+" : unreadCount}
                 </span>
               )}
