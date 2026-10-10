@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { normalizeBatchRecord } from "@/lib/data-model";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function PATCH(
@@ -9,7 +10,8 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-    const status = body.status ?? body.newStatus;
+    const normalized = normalizeBatchRecord(body);
+    const status = normalized.status ?? body.status ?? body.newStatus;
 
     if (!status) {
       return NextResponse.json({ error: "status is required" }, { status: 400 });

@@ -174,7 +174,7 @@ function LoadedBatchCard({
         </p>
       </div>
       <span
-        className={`ml-auto flex-shrink-0 rounded-full px-3 py-1.5 text-xs font-bold ${
+        className={`ml-auto shrink-0 rounded-full px-3 py-1.5 text-xs font-bold ${
           status === "CERTIFIED"
             ? "bg-accent-green/20 text-accent-green"
             : "bg-accent-amber/20 text-accent-amber"
@@ -668,7 +668,7 @@ function NewBatchTab() {
 
                 {statusStage === "error" && errorMessage ? (
                   <div className="rounded-lg border border-accent-red/30 bg-accent-red/10 p-3 text-sm text-accent-red flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
                     <span>{errorMessage}</span>
                   </div>
                 ) : null}
@@ -737,7 +737,7 @@ function NewBatchTab() {
           ))}
 
           <div className="mt-4 flex items-start gap-3 rounded-xl border border-accent-purple/30 bg-accent-purple/10 p-4">
-            <LinkIcon className="mt-0.5 h-4 w-4 flex-shrink-0 text-accent-purple" />
+            <LinkIcon className="mt-0.5 h-4 w-4 shrink-0 text-accent-purple" />
             <p className="text-xs text-agri-muted">
               Once submitted, this batch will be assigned an on-chain ID and a
               QR code will be generated automatically.
@@ -1119,7 +1119,7 @@ function VerifyBatchTab() {
 
           {statusStage === "error" && errorMessage ? (
             <div className="rounded-lg border border-accent-red/30 bg-accent-red/10 p-3 text-sm text-accent-red flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+              <AlertTriangle className="h-4 w-4 shrink-0" />
               <span>{errorMessage}</span>
             </div>
           ) : null}
@@ -1195,7 +1195,7 @@ function VerifyBatchTab() {
                 {index < steps.length - 1 ? (
                   <div className="absolute bottom-0 left-3.5 top-8 border-l-2 border-dashed border-agri-border" />
                 ) : null}
-                <span className="relative z-10 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-accent-blue/20 text-xs font-bold text-accent-blue">
+                <span className="relative z-10 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent-blue/20 text-xs font-bold text-accent-blue">
                   {index + 1}
                 </span>
                 <p className="text-xs text-agri-text">{step}</p>
@@ -1552,7 +1552,7 @@ function HandoffTab() {
 
           {statusStage === "error" && errorMessage ? (
             <div className="rounded-lg border border-accent-red/30 bg-accent-red/10 p-3 text-sm text-accent-red flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+              <AlertTriangle className="h-4 w-4 shrink-0" />
               <span>{errorMessage}</span>
             </div>
           ) : null}

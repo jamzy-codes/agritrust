@@ -20,8 +20,9 @@ export default function LoginPage() {
   const router = useRouter();
   const [form, setForm] = useState<LoginForm>({ email: "", password: "" });
   const [showPassword, setShowPassword] = useState(false);
-  const [showResetMessage, setShowResetMessage] = useState(false);
-   const [error, setError] = useState<string | null>(null);
+  const [resetMessage, setResetMessage] = useState<string | null>(null);
+  const [isResetting, setIsResetting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const { openConnectModal } = useConnectModal();
   const { address, isConnected } = useAccount();
@@ -56,6 +57,30 @@ export default function LoginPage() {
       router.push("/dashboard");
     }
   } 
+
+  async function handlePasswordReset() {
+    setError(null);
+    setResetMessage(null);
+
+    if (!form.email) {
+      setError("Enter your email address first, then request a password reset.");
+      return;
+    }
+
+    setIsResetting(true);
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(form.email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    setIsResetting(false);
+
+    if (resetError) {
+      setError(resetError.message);
+      return;
+    }
+
+    setResetMessage("If an account exists for this email, a password-reset link has been sent.");
+  }
+
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-agri-base px-4 py-10">
       <div className="pointer-events-none absolute -left-20 -top-20 h-72 w-72 rounded-full bg-accent-green/8 blur-3xl" />
@@ -121,14 +146,15 @@ export default function LoginPage() {
               <button
                 className="text-xs text-accent-green"
                 type="button"
-                onClick={() => setShowResetMessage(true)}
+                onClick={handlePasswordReset}
+                disabled={isResetting}
               >
-                Forgot password?
+                {isResetting ? "Sending reset link..." : "Forgot password?"}
               </button>
             </div>
-            {showResetMessage ? (
+            {resetMessage ? (
               <p className="mt-1 text-xs text-agri-muted">
-                Password reset coming soon
+                {resetMessage}
               </p>
             ) : null}
           </label>

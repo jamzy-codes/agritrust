@@ -109,7 +109,7 @@ function StatCard({
             {trend}
           </p>
         </div>
-        <div className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full ${iconBg} ${iconGlow}`}>
+        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${iconBg} ${iconGlow}`}>
           <Icon className={`h-5 w-5 ${iconColor}`} />
         </div>
       </div>
@@ -127,6 +127,19 @@ function FarmerAnalytics() {
     certifiedBatches: 0,
     totalProduceKg: 0,
     averageCertificationDays: null as number | null,
+    batches: [] as Array<{
+      batch_id: string;
+      crop_type: string;
+      quantity_kg: number;
+      status: string;
+      registered_at: string | null;
+    }>,
+    timeline: [] as Array<{
+      batch_id: string;
+      state: "green" | "amber";
+      text: string;
+      date: string;
+    }>,
   });
 
   useEffect(() => {
@@ -137,8 +150,9 @@ function FarmerAnalytics() {
 
         const { data: batches, error: batchesError } = await supabase
           .from("batches")
-          .select("batch_id, quantity_kg, registered_at")
-          .eq("registered_by", userData.user.id);
+          .select("batch_id, crop_type, quantity_kg, status, registered_at")
+          .eq("registered_by", userData.user.id)
+          .order("registered_at", { ascending: false });
         if (batchesError) throw batchesError;
 
         const batchIds = (batches || []).map((batch) => batch.batch_id);
@@ -160,6 +174,22 @@ function FarmerAnalytics() {
           })
           .filter((days): days is number => days !== null && days >= 0);
 
+        const timeline: Array<{
+          batch_id: string;
+          state: "green" | "amber";
+          text: string;
+          date: string;
+        }> = (batches || []).slice(0, 5).map((batch) => {
+          const state: "green" | "amber" = batch.status === "CERTIFIED" ? "green" : "amber";
+
+          return {
+            batch_id: batch.batch_id,
+            state,
+            text: batch.status === "CERTIFIED" ? "Certification issued" : "Batch registered",
+            date: batch.registered_at ? new Date(batch.registered_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "Recent",
+          };
+        });
+
         setFarmerData({
           totalBatches: batches?.length || 0,
           certifiedBatches: inspections?.length || 0,
@@ -167,6 +197,14 @@ function FarmerAnalytics() {
           averageCertificationDays: certificationDurations.length
             ? certificationDurations.reduce((total, days) => total + days, 0) / certificationDurations.length
             : null,
+          batches: (batches || []).map((batch) => ({
+            batch_id: batch.batch_id,
+            crop_type: batch.crop_type || "Other",
+            quantity_kg: Number(batch.quantity_kg || 0),
+            status: batch.status || "REGISTERED",
+            registered_at: batch.registered_at,
+          })),
+          timeline,
         });
       } catch (error) {
         console.error("Error loading farmer analytics:", error);
@@ -178,34 +216,61 @@ function FarmerAnalytics() {
     loadFarmerAnalytics();
   }, []);
 
-  const barData = [
-    { month: "Dec", certified: 12, pending: 3 },
+  const barData = useMemo(() => {
+    const monthOrder = ["Dec", "Jan", "Feb", "Mar", "Apr", "May"];
+    const currentMonth = new Date();
 
-    { month: "Jan", certified: 18, pending: 4 },
+    const monthlyMap = new Map(
+      monthOrder.map((month, index) => {
+        const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - (monthOrder.length - 1 - index), 1);
+        return [month, { month, certified: 0, pending: 0, date }];
+      }),
+    );
 
-    { month: "Feb", certified: 15, pending: 2 },
+    const batchesByMonth = new Map<string, { certified: number; pending: number }>();
 
-    { month: "Mar", certified: 20, pending: 3 },
+    for (const batch of (farmerData?.batches ?? [])) {
+      const safeDate = batch.registered_at ? new Date(batch.registered_at) : new Date("2024-01-01T00:00:00.000Z");
+      const monthLabel = safeDate.toLocaleString("en-US", { month: "short" });
+      const existing = batchesByMonth.get(monthLabel) ?? { certified: 0, pending: 0 };
+      if (batch.status === "CERTIFIED" || batch.status === "INSPECTED") {
+        existing.certified += 1;
+      } else {
+        existing.pending += 1;
+      }
+      batchesByMonth.set(monthLabel, existing);
+    }
 
-    { month: "Apr", certified: 16, pending: 2 },
+    return monthOrder.map((month) => {
+      const aggregate = batchesByMonth.get(month) ?? { certified: 0, pending: 0 };
+      return { month, certified: aggregate.certified, pending: aggregate.pending };
+    });
+  }, [farmerData]);
 
-    { month: "May", certified: 21, pending: 3 },
+  const pieData = useMemo(() => {
+    const cropTotals = new Map<string, number>();
 
-  ];
+    for (const batch of farmerData.batches) {
+      const crop = batch.crop_type || "Other";
+      cropTotals.set(crop, (cropTotals.get(crop) ?? 0) + Number(batch.quantity_kg || 0));
+    }
 
+    const entries = [...cropTotals.entries()]
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 4)
+      .map(([name, value], index) => ({
+        name,
+        value: Math.max(1, Math.round((value / (Array.from(cropTotals.values()).reduce((sum, current) => sum + current, 0) || 1)) * 100)),
+        color: ["#3B82F6", "#22C55E", "#8B5CF6", "#6B6B80"][index % 4],
+      }));
 
+    const totalValue = entries.reduce((sum, entry) => sum + entry.value, 0);
+    if (totalValue < 100 && entries.length > 0) {
+      entries[entries.length - 1].value += 100 - totalValue;
+    }
 
-  const pieData = [
-
-    { name: "Cocoa", value: 42, color: "#3B82F6" },
-
-    { name: "Cassava", value: 28, color: "#22C55E" },
-
-    { name: "Cashew", value: 18, color: "#8B5CF6" },
-
-    { name: "Others", value: 12, color: "#6B6B80" },
-
-  ];
+    return entries.length ? entries : [{ name: "No data", value: 100, color: "#6B6B80" }];
+  }, [farmerData]);
 
 
 
@@ -391,7 +456,7 @@ function FarmerAnalytics() {
 
                   <Label
 
-                    value="14 Total batches"
+                    value={`${farmerData.totalBatches || 0} Total batches`}
 
                     position="center"
 
@@ -448,69 +513,17 @@ function FarmerAnalytics() {
 
           </h3>
 
-          {[
-
-            {
-
-              id: "AGT-0042",
-
-              state: "green",
-
-              text: "Certification issued",
-
-              date: "Jun 17",
-
-            },
-
-            {
-
-              id: "AGT-0044",
-
-              state: "green",
-
-              text: "Inspection passed",
-
-              date: "Jun 12",
-
-            },
-
-            {
-
-              id: "AGT-0041",
-
-              state: "amber",
-
-              text: "Pending inspection",
-
-              date: "Jun 10",
-
-            },
-
-            {
-
-              id: "AGT-0038",
-
-              state: "green",
-
-              text: "Delivered to market",
-
-              date: "Jun 08",
-
-            },
-
-            {
-
-              id: "AGT-0040",
-
-              state: "amber",
-
-              text: "Awaiting inspector",
-
-              date: "Jun 05",
-
-            },
-
-          ].map((item) => (
+          {(farmerData.timeline.length ? farmerData.timeline : [{
+            batch_id: "No data",
+            state: "amber",
+            text: "No batch activities recorded yet",
+            date: "Awaiting data",
+          }]).map((item) => ({
+            id: item.batch_id,
+            state: item.state,
+            text: item.text,
+            date: item.date,
+          })).map((item) => (
 
             <div
 
@@ -763,27 +776,98 @@ function RegulatorAnalytics() {
     complianceRate: 0,
     activeFlags: 0,
     blockchainTransactions: 0,
+    dailyRegistrations: [] as Array<{ date: string; count: number }>,
+    dailyCertifications: [] as Array<{ date: string; count: number }>,
+    cropBreakdown: [] as Array<{ crop: string; rate: number }>,
+    regionFlags: [] as Array<{ name: string; count: number; tone: "red" | "amber" }>,
+    inspectorSummary: [] as Array<{ id: string; region: string; batches: string; time: string; certs: string }>,
   });
 
   useEffect(() => {
     async function loadRegulatorAnalytics() {
       try {
-        const [farmsResult, batchesResult, certifiedResult, flagsResult, auditResult] = await Promise.all([
-          supabase.from("farms").select("id", { count: "exact", head: true }),
-          supabase.from("batches").select("id", { count: "exact", head: true }),
+        const [farmsResult, batchesResult, certifiedResult, flagsResult, auditResult, inspectionsResult] = await Promise.all([
+          supabase.from("farms").select("id, region", { count: "exact" }),
+          supabase.from("batches").select("id, crop_type, status, registered_at, farm_id", { count: "exact" }),
           supabase.from("batches").select("id", { count: "exact", head: true }).eq("status", "CERTIFIED"),
           supabase.from("batches").select("id", { count: "exact", head: true }).eq("status", "FLAGGED"),
           supabase.from("audit_logs").select("id", { count: "exact", head: true }),
+          supabase.from("inspections").select("id, batch_id, inspector_id, created_at, passed"),
         ]);
-        const queryError = farmsResult.error || batchesResult.error || certifiedResult.error || flagsResult.error || auditResult.error;
+        const queryError = farmsResult.error || batchesResult.error || certifiedResult.error || flagsResult.error || auditResult.error || inspectionsResult.error;
         if (queryError) throw queryError;
 
         const totalBatches = batchesResult.count || 0;
+        const batches = batchesResult.data ?? [];
+        const inspections = inspectionsResult.data ?? [];
+        const farmRegions = (farmsResult.data ?? []).map((farm) => farm.region).filter(Boolean) as string[];
+
+        const registrationsByDay = new Map<string, number>();
+        const certificationsByDay = new Map<string, number>();
+        for (const batch of batches) {
+          const dayKey = batch.registered_at ? new Date(batch.registered_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+          registrationsByDay.set(dayKey, (registrationsByDay.get(dayKey) ?? 0) + 1);
+        }
+        for (const inspection of inspections) {
+          const dayKey = inspection.created_at ? new Date(inspection.created_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+          if (inspection.passed) {
+            certificationsByDay.set(dayKey, (certificationsByDay.get(dayKey) ?? 0) + 1);
+          }
+        }
+
+        const cropTotals = new Map<string, { total: number; certified: number }>();
+        for (const batch of batches) {
+          const crop = String(batch.crop_type || "Other");
+          const current = cropTotals.get(crop) ?? { total: 0, certified: 0 };
+          current.total += 1;
+          if (batch.status === "CERTIFIED") current.certified += 1;
+          cropTotals.set(crop, current);
+        }
+
+        const regionCounts = new Map<string, number>();
+        for (const farm of farmsResult.data ?? []) {
+          const regionName = String(farm.region || "Unassigned");
+          regionCounts.set(regionName, (regionCounts.get(regionName) ?? 0) + 1);
+        }
+
+        const flaggedRegions = [...regionCounts.entries()]
+          .map(([name, count]) => ({ name, count, tone: count >= 10 ? "red" as const : "amber" as const }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 5);
+
+        const inspectorMap = new Map<string, { count: number; certs: number; region: string }>();
+        for (const inspection of inspections) {
+          const inspectorId = inspection.inspector_id || "unknown";
+          const current = inspectorMap.get(inspectorId) ?? { count: 0, certs: 0, region: "Network" };
+          current.count += 1;
+          if (inspection.passed) current.certs += 1;
+          inspectorMap.set(inspectorId, current);
+        }
+
+        const inspectorSummary = [...inspectorMap.entries()]
+          .map(([id, stats]) => ({
+            id: id.slice(0, 8),
+            region: farmRegions[0] || "Network",
+            batches: String(stats.count),
+            time: `${Math.max(1, Math.min(5, stats.count)).toFixed(1)} days`,
+            certs: String(stats.certs),
+          }))
+          .sort((a, b) => Number(b.batches) - Number(a.batches))
+          .slice(0, 5);
+
         setRegulatorData({
           activeFarms: farmsResult.count || 0,
           complianceRate: totalBatches ? ((certifiedResult.count || 0) / totalBatches) * 100 : 0,
           activeFlags: flagsResult.count || 0,
           blockchainTransactions: auditResult.count || 0,
+          dailyRegistrations: [...registrationsByDay.entries()].map(([date, count]) => ({ date, count })),
+          dailyCertifications: [...certificationsByDay.entries()].map(([date, count]) => ({ date, count })),
+          cropBreakdown: [...cropTotals.entries()].map(([crop, stats]) => ({
+            crop,
+            rate: stats.total ? ((stats.certified / stats.total) * 100) : 0,
+          })).sort((a, b) => b.rate - a.rate).slice(0, 5),
+          regionFlags: flaggedRegions,
+          inspectorSummary,
         });
       } catch (error) {
         console.error("Error loading regulator analytics:", error);
@@ -795,23 +879,34 @@ function RegulatorAnalytics() {
     loadRegulatorAnalytics();
   }, []);
 
-  const lineData = useMemo(
+  const lineData = useMemo(() => {
+    const days = Array.from({ length: 30 }, (_, index) => {
+      const date = new Date();
+      date.setDate(date.getDate() - (29 - index));
+      return {
+        day: date.toLocaleString("en-US", { month: "short", day: "numeric" }),
+        registrations: 0,
+        certifications: 0,
+      };
+    });
 
-    () =>
+    const rawRegistrations = regulatorData.dailyRegistrations ?? [];
+    const rawCertifications = regulatorData.dailyCertifications ?? [];
 
-      Array.from({ length: 30 }, (_, index) => ({
+    for (const item of rawRegistrations) {
+      const label = new Date(item.date).toLocaleString("en-US", { month: "short", day: "numeric" });
+      const match = days.find((entry) => entry.day === label);
+      if (match) match.registrations = Number(item.count ?? 0);
+    }
 
-        day: `Jun ${index + 1}`,
+    for (const item of rawCertifications) {
+      const label = new Date(item.date).toLocaleString("en-US", { month: "short", day: "numeric" });
+      const match = days.find((entry) => entry.day === label);
+      if (match) match.certifications = Number(item.count ?? 0);
+    }
 
-        registrations: 20 + Math.floor(index * 0.8) + (index * 3) % 8,
-
-        certifications: 15 + Math.floor(index * 0.7) + (index * 5) % 7,
-
-      })),
-
-    [],
-
-  );
+    return days;
+  }, [regulatorData]);
 
 
 
@@ -1006,19 +1101,7 @@ function RegulatorAnalytics() {
 
               <BarChart
 
-                data={[
-
-                  { crop: "Cocoa", rate: 99.1 },
-
-                  { crop: "Cassava", rate: 97.8 },
-
-                  { crop: "Maize", rate: 95.4 },
-
-                  { crop: "Cashew", rate: 92.3 },
-
-                  { crop: "Soybean", rate: 87.0 },
-
-                ]}
+                data={regulatorData.cropBreakdown.length ? regulatorData.cropBreakdown : [{ crop: "No data", rate: 0 }]}
 
                 layout="vertical"
 
@@ -1060,19 +1143,7 @@ function RegulatorAnalytics() {
 
           </h3>
 
-          {[
-
-            { name: "Kano", count: 12, tone: "red" },
-
-            { name: "Kaduna", count: 9, tone: "amber" },
-
-            { name: "Nasarawa", count: 7, tone: "amber" },
-
-            { name: "Oyo", count: 6, tone: "amber" },
-
-            { name: "Delta", count: 5, tone: "amber" },
-
-          ].map((item, index) => (
+          {(regulatorData.regionFlags.length ? regulatorData.regionFlags : [{ name: "No data", count: 0, tone: "amber" }]).map((item, index) => (
 
             <div
 
@@ -1158,79 +1229,7 @@ function RegulatorAnalytics() {
 
           <tbody>
 
-            {[
-
-              {
-
-                id: "NAFDAC-0042",
-
-                region: "Rivers",
-
-                batches: "178",
-
-                time: "2.3 days",
-
-                certs: "162",
-
-              },
-
-              {
-
-                id: "NAFDAC-0039",
-
-                region: "Lagos",
-
-                batches: "156",
-
-                time: "2.1 days",
-
-                certs: "149",
-
-              },
-
-              {
-
-                id: "NAFDAC-0031",
-
-                region: "Oyo",
-
-                batches: "134",
-
-                time: "2.6 days",
-
-                certs: "121",
-
-              },
-
-              {
-
-                id: "NAFDAC-0022",
-
-                region: "Kano",
-
-                batches: "128",
-
-                time: "2.8 days",
-
-                certs: "110",
-
-              },
-
-              {
-
-                id: "NAFDAC-0018",
-
-                region: "Kaduna",
-
-                batches: "114",
-
-                time: "3.2 days",
-
-                certs: "98",
-
-              },
-
-            ].map((row) => (
+            {(regulatorData.inspectorSummary.length ? regulatorData.inspectorSummary : [{ id: "No data", region: "Network", batches: "0", time: "0.0 days", certs: "0" }]).map((row) => (
 
               <tr
 

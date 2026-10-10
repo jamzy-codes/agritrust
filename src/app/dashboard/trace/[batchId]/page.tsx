@@ -119,13 +119,13 @@ export default async function TraceBatchDetailPage({
       </section>
 
       <section className="relative mx-8 mb-6 rounded-xl glass p-8 overflow-hidden">
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-accent-green/3 to-transparent" />
+        <div className="pointer-events-none absolute inset-0 bg-linear-to-b from-accent-green/3 to-transparent" />
         <h2 className="relative z-10 mb-8 text-base font-semibold text-agri-text">Supply chain timeline</h2>
         <div className="relative flex items-start justify-between">
           <div className="absolute left-0 right-0 top-10 z-0 h-0.5">
             <div className="absolute left-[10%] top-0 h-0.5 w-[20%] bg-accent-green" />
             <div className="absolute left-[30%] top-0 h-0.5 w-[20%] bg-accent-green" />
-            <div className="absolute left-[50%] top-0 h-0.5 w-[20%] bg-gradient-to-r from-accent-green to-accent-amber" />
+            <div className="absolute left-[50%] top-0 h-0.5 w-[20%] bg-linear-to-r from-accent-green to-accent-amber" />
             <div
               className="absolute left-[70%] top-0 h-0.5 w-[20%]"
               style={{
@@ -199,7 +199,7 @@ export default async function TraceBatchDetailPage({
             ["Certificate TX", TX_HASHES.certificate],
           ].map(([label, hash]) => (
             <div key={label} className="flex items-start gap-3 border-b border-agri-border py-3 last:border-0">
-              <LinkIcon className="mt-0.5 h-4 w-4 flex-shrink-0 text-accent-purple" />
+              <LinkIcon className="mt-0.5 h-4 w-4 shrink-0 text-accent-purple" />
               <div>
                 <p className="text-xs font-bold text-agri-text">{label}</p>
                 <p className="break-all font-mono text-xs text-accent-cyan">{hash}</p>

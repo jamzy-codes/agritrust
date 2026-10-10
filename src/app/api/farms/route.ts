@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { buildFarmPayload, normalizeFarmRecord } from "@/lib/data-model";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function GET(request: NextRequest) {
@@ -31,9 +32,10 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const farmName = body.farmName ?? body.farm_name;
-    const location = body.location ?? body.locationName;
-    const ownerId = body.ownerId ?? body.owner_id;
+    const normalized = normalizeFarmRecord(body);
+    const ownerId = normalized.owner_id;
+    const farmName = normalized.farm_name ?? normalized.name;
+    const location = normalized.location ?? normalized.region;
 
     if (!ownerId || !farmName || !location) {
       return NextResponse.json(
@@ -45,15 +47,11 @@ export async function POST(request: NextRequest) {
     }
 
     const payload = {
+      ...buildFarmPayload(body),
       owner_id: ownerId,
       farm_name: farmName,
       location,
-      gps_coordinates: body.gpsCoordinates ?? body.gps_coordinates ?? null,
-      nasc_registration: body.nascRegistration ?? body.nasc_registration ?? null,
-      primary_crops: Array.isArray(body.primaryCrops)
-        ? body.primaryCrops
-        : body.primary_crops ?? null,
-      farm_photo_url: body.farmPhotoUrl ?? body.farm_photo_url ?? null,
+      region: location,
     };
 
     const { data, error } = await supabaseAdmin.from("farms").insert(payload).select().single();

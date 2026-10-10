@@ -330,7 +330,7 @@ export default function RegulatorApprovalsPage() {
 
       {statusStage === "error" && errorMessage ? (
         <div className="mb-6 rounded-xl border border-accent-red/30 bg-accent-red/10 p-4 text-sm text-accent-red flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+          <AlertTriangle className="h-4 w-4 shrink-0" />
           <span>{errorMessage}</span>
         </div>
       ) : null}

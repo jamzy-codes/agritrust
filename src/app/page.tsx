@@ -87,7 +87,7 @@ const stats = [
 export default function Home() {
   return (
     <main className="min-h-screen bg-agri-base text-agri-text">
-      <nav className="fixed left-0 right-0 top-0 z-50 flex items-center justify-between border-b border-agri-border border-white/5 bg-agri-base/90 px-8 py-4 backdrop-blur-sm">
+      <nav className="fixed left-0 right-0 top-0 z-50 flex items-center justify-between border-b border-white/5 border-white/5 bg-agri-base/90 px-8 py-4 backdrop-blur-sm">
         <BrandLogo size="md" textClassName="text-xl" />
         <div className="hidden items-center gap-6 md:flex">
           {[
@@ -111,7 +111,7 @@ export default function Home() {
 
       <section className="relative mx-auto max-w-4xl overflow-hidden px-6 pb-24 pt-40 text-center">
         <div className="hero-gradient pointer-events-none absolute inset-0" />
-        <div className="pointer-events-none absolute left-1/2 top-1/2 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-green/5 blur-3xl" />
+        <div className="pointer-events-none absolute left-1/2 top-1/2 h-150px w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-green/5 blur-3xl" />
         <h1
           className="relative text-5xl font-bold leading-tight text-agri-text"
           style={{ fontFamily: "var(--font-outfit)" }}

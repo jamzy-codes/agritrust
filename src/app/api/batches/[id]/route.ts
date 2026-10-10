@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { normalizeBatchRecord } from "@/lib/data-model";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function GET(
@@ -36,17 +37,18 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
+    const normalized = normalizeBatchRecord(body);
     const updatePayload = {
-      farm_id: body.farmId ?? body.farm_id,
-      crop_type: body.cropType ?? body.crop_type,
-      quantity_kg: body.quantityKg ?? body.quantity_kg,
-      seed_variety: body.seedVariety ?? body.seed_variety,
-      is_gmo_free: body.isGMOFree ?? body.is_gmo_free,
-      gmo_status: body.gmoStatus ?? body.gmo_status,
-      status: body.status,
-      tx_hash: body.txHash ?? body.tx_hash,
-      metadata_uri: body.metadataUri ?? body.metadata_uri,
-      metadata_hash: body.metadataHash ?? body.metadata_hash,
+      farm_id: normalized.farm_id ?? undefined,
+      crop_type: normalized.crop_type ?? undefined,
+      quantity_kg: normalized.quantity_kg ?? undefined,
+      seed_variety: normalized.seed_variety ?? undefined,
+      is_gmo_free: normalized.is_gmo_free ?? undefined,
+      gmo_status: normalized.gmo_status ?? undefined,
+      status: normalized.status ?? undefined,
+      tx_hash: normalized.tx_hash ?? undefined,
+      metadata_uri: normalized.metadata_uri ?? undefined,
+      metadata_hash: normalized.metadata_hash ?? undefined,
       updated_at: new Date().toISOString(),
     };
 

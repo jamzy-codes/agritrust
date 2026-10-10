@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { buildBatchPayload, normalizeBatchRecord } from "@/lib/data-model";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function GET(request: NextRequest) {
@@ -36,9 +37,10 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const batchId = body.batchId ?? body.batch_id;
-    const farmId = body.farmId ?? body.farm_id;
-    const registeredBy = body.registeredBy ?? body.registered_by;
+    const normalized = normalizeBatchRecord(body);
+    const batchId = normalized.batch_id;
+    const farmId = normalized.farm_id;
+    const registeredBy = normalized.registered_by;
 
     if (!batchId || !farmId || !registeredBy) {
       return NextResponse.json(
@@ -50,18 +52,10 @@ export async function POST(request: NextRequest) {
     }
 
     const payload = {
+      ...buildBatchPayload(body),
       batch_id: batchId,
       farm_id: farmId,
       registered_by: registeredBy,
-      crop_type: body.cropType ?? body.crop_type,
-      quantity_kg: Number(body.quantityKg ?? body.quantity_kg ?? 0),
-      seed_variety: body.seedVariety ?? body.seed_variety ?? null,
-      is_gmo_free: Boolean(body.isGMOFree ?? body.is_gmo_free ?? false),
-      gmo_status: body.gmoStatus ?? body.gmo_status ?? "farmer_declared",
-      status: body.status ?? "REGISTERED",
-      tx_hash: body.txHash ?? body.tx_hash ?? null,
-      metadata_uri: body.metadataUri ?? body.metadata_uri ?? null,
-      metadata_hash: body.metadataHash ?? body.metadata_hash ?? null,
     };
 
     if (!payload.crop_type) {

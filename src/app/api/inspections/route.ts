@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { buildInspectionPayload, normalizeInspectionRecord } from "@/lib/data-model";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function GET(request: NextRequest) {
@@ -30,8 +31,9 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const batchId = body.batchId ?? body.batch_id;
-    const inspectorId = body.inspectorId ?? body.inspector_id;
+    const normalized = normalizeInspectionRecord(body);
+    const batchId = normalized.batch_id;
+    const inspectorId = normalized.inspector_id;
 
     if (!batchId || !inspectorId) {
       return NextResponse.json(
@@ -41,15 +43,9 @@ export async function POST(request: NextRequest) {
     }
 
     const payload = {
+      ...buildInspectionPayload(body),
       batch_id: batchId,
       inspector_id: inspectorId,
-      result: body.result ?? body.inspection_result ?? "PENDING",
-      notes: body.notes ?? null,
-      passed: Boolean(body.passed ?? false),
-      quality_grade: body.qualityGrade ?? body.quality_grade ?? null,
-      gmo_test_result: body.gmoTestResult ?? body.gmo_test_result ?? null,
-      certificate_issued: Boolean(body.certificateIssued ?? body.certificate_issued ?? false),
-      tx_hash: body.txHash ?? body.tx_hash ?? null,
     };
 
     const { data, error } = await supabaseAdmin.from("inspections").insert(payload).select().single();
