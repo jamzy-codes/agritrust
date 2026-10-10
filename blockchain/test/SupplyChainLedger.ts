@@ -1,12 +1,13 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
+import type { Signer } from "ethers";
 import type { ProduceRegistry, SupplyChainLedger } from "../typechain-types";
 
 describe("SupplyChainLedger", function () {
   let produceRegistry: ProduceRegistry;
   let supplyChainLedger: SupplyChainLedger;
-  let owner: any, farmer: any, distributor: any, retailer: any, regulator: any, randomUser: any;
+  let owner: Signer, farmer: Signer, distributor: Signer, retailer: Signer, regulator: Signer, randomUser: Signer;
 
   const FARMER_ROLE = 1;
   const DISTRIBUTOR_ROLE = 2;
