@@ -44,11 +44,11 @@ export default function BrandLogo({
   imageClassName = "",
 }: BrandLogoProps) {
   return (
-    <div className={`flex flex-shrink-0 items-center gap-2.5 ${className}`}>
+    <div className={`flex shrink-0 items-center gap-2.5 ${className}`}>
       <img
         src="/agritrust-logo.png"
         alt="AgriTrust"
-        className={`${imageSizes[size]} flex-shrink-0 object-cover ${imageClassName}`}
+        className={`${imageSizes[size]} shrink-0 object-cover ${imageClassName}`}
       />
       {showName ? (
         <BrandName className={`${textSizes[size]} ${textClassName}`} />
