@@ -1,0 +1,41 @@
+{
+  "origin": "High-resolution AgriTrust artwork supplied by the user, plus previously approved supply-chain and farmer crops.",
+  "note": "Phone, blockchain records and dashboard are illustrative artwork, not live application data.",
+  "assets": [
+    {
+      "name": "agritrust-africa-network.png",
+      "source": "User-provided original, displayed without cropping",
+      "width": 1672,
+      "height": 941
+    },
+    {
+      "name": "supply-chain",
+      "reference": 1,
+      "left": 180,
+      "top": 408,
+      "width": 755,
+      "height": 88
+    },
+    {
+      "name": "agritrust-verification-phone.png",
+      "source": "User-provided original, displayed without cropping",
+      "width": 1254,
+      "height": 1254
+    },
+    {
+      "name": "agritrust-regulator-dashboard.png",
+      "source": "User-provided original, displayed without cropping",
+      "width": 1672,
+      "height": 941
+    },
+    {
+      "name": "farmer",
+      "reference": 3,
+      "left": 744,
+      "top": 520,
+      "width": 290,
+      "height": 192
+    }
+  ],
+  "mobileSupply": "Five 90 × 88 crops of supply-chain.webp at horizontal offsets 0, 170, 335, 500 and 665. Generated for an ordered mobile layout."
+}
