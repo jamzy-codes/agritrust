@@ -12,8 +12,11 @@ import {
   Warehouse,
 } from "lucide-react";
 import Link from "next/link";
+import Image from "next/image";
+import "./landing.css";
 
 import BrandLogo from "@/components/brand/BrandLogo";
+import LandingMobileMenu from "@/components/layout/LandingMobileMenu";
 
 const flowSteps = [
   { icon: Sprout, label: "Farm", color: "text-accent-green" },
@@ -84,226 +87,71 @@ const stats = [
   { value: "4.2M", label: "Batches traced", color: "text-accent-purple" },
 ];
 
+
+// Keep the existing destinations throughout this visual-only redesign.
+const navigationItems = ["How it works", "For Farmers", "For Regulators", "Verify Produce"];
 export default function Home() {
   return (
-    <main className="min-h-screen bg-agri-base text-agri-text">
-      <nav className="fixed left-0 right-0 top-0 z-50 flex items-center justify-between border-b border-white/5 border-white/5 bg-agri-base/90 px-8 py-4 backdrop-blur-sm">
-        <BrandLogo size="md" textClassName="text-xl" />
-        <div className="hidden items-center gap-6 md:flex">
-          {[
-            "How it works",
-            "For Farmers",
-            "For Regulators",
-            "Verify Produce",
-          ].map((item) => (
-            <a key={item} className="text-sm text-agri-muted hover:text-agri-text" href="#how-it-works">
-              {item}
-            </a>
-          ))}
-          <Link
-            className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-medium text-white hover:bg-accent-blue/90"
-            href="/register"
-          >
-            Get Started
-          </Link>
-        </div>
+    <main className="landing">
+      <nav className="landing-nav landing-container" aria-label="Main navigation">
+        <BrandLogo size="sm" textClassName="text-xl" />
+        <div className="landing-nav-links">{navigationItems.map(item => <a key={item} href="#how-it-works">{item}</a>)}</div>
+        <Link className="landing-button landing-button-nav" href="/register">Get Started</Link>
+        <LandingMobileMenu items={navigationItems} />
       </nav>
-
-      <section className="relative mx-auto max-w-4xl overflow-hidden px-6 pb-24 pt-40 text-center">
-        <div className="hero-gradient pointer-events-none absolute inset-0" />
-        <div className="pointer-events-none absolute left-1/2 top-1/2 h-150px w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-green/5 blur-3xl" />
-        <h1
-          className="relative text-5xl font-bold leading-tight text-agri-text"
-          style={{ fontFamily: "var(--font-outfit)" }}
-        >
-          <span className="block">Every harvest.</span>
-          <span className="block">
-            Verified{" "}
-            <span className="bg-gradient-to-r from-accent-green to-accent-blue bg-clip-text text-transparent">
-              on-chain.
-            </span>
-          </span>
-        </h1>
-        <p className="relative mx-auto mt-6 max-w-2xl text-lg text-agri-muted">
-          AgriTrust gives farms, inspectors, regulators, and consumers one trusted source of truth for safe, traceable produce.
-        </p>
-        <div className="relative mt-8 flex flex-wrap justify-center gap-4">
-          <Link className="flex items-center gap-2 rounded-xl bg-accent-green px-6 py-3 font-semibold text-white transition-shadow hover:shadow-[0_0_24px_rgba(34,197,94,0.4)]" href="/register">
-            <Sprout className="h-5 w-5" />
-            Register Your Farm
-          </Link>
-          <Link className="flex items-center gap-2 rounded-xl border border-agri-border px-6 py-3 font-semibold text-agri-text transition-shadow hover:shadow-[0_0_24px_rgba(59,130,246,0.3)]" href="/verify/AGT-0042">
-            <QrCode className="h-5 w-5" />
-            Scan a Product
-          </Link>
+      <section className="landing-hero" aria-labelledby="hero-heading">
+        <div className="landing-hero-grid">
+          <div className="landing-hero-copy">
+            <h1 id="hero-heading"><span>Every harvest.</span><span className="landing-gradient-text">Verified on-chain.</span></h1>
+            <p>AgriTrust gives farms, inspectors, regulators, and consumers one trusted source of truth for safe, traceable produce.</p>
+            <div className="landing-actions">
+              <Link className="landing-button landing-button-light" href="/register"><Sprout aria-hidden="true" />Register Your Farm</Link>
+              <Link className="landing-button landing-button-outline" href="/verify/AGT-0042"><QrCode aria-hidden="true" />Scan a Product</Link>
+            </div>
+            <div className="landing-trust"><span><CheckCircle2 aria-hidden="true" />Tamper-proof records</span><span><ShieldCheck aria-hidden="true" />NAFDAC-ready</span><span><ChainLink aria-hidden="true" />Blockchain-anchored</span></div>
+          </div>
+          <div className="landing-network"><Image src="/landing/agritrust-africa-network.png" alt="AgriTrust illustration of Africa with country boundaries, connected verification nodes and blockchain record cards" width={1672} height={941} priority unoptimized /></div>
         </div>
-        <div className="relative mt-8 flex flex-wrap justify-center gap-3">
-          <span className="flex items-center gap-2 rounded-full border border-agri-border bg-agri-surface px-4 py-2 text-sm">
-            <CheckCircle2 className="h-4 w-4 text-accent-green" /> Tamper-proof records
-          </span>
-          <span className="flex items-center gap-2 rounded-full border border-agri-border bg-agri-surface px-4 py-2 text-sm">
-            <ShieldCheck className="h-4 w-4 text-accent-blue" /> NAFDAC-ready
-          </span>
-          <span className="flex items-center gap-2 rounded-full border border-agri-border bg-agri-surface px-4 py-2 text-sm">
-            <ChainLink className="h-4 w-4 text-accent-purple" /> Blockchain-anchored
-          </span>
+        <figure className="landing-supply-chain">
+          <Image src="/landing/supply-chain.webp" alt="Farm equipment, handling facilities, a delivery truck and a produce market connected by illuminated nodes" width={755} height={88} unoptimized />
+          <figcaption>{flowSteps.map(({label}) => <span key={label}>{label}</span>)}</figcaption>
+          <div className="landing-mobile-flow">{flowSteps.map(({label},index) => <div key={label}><Image src={"/landing/supply-step-"+index+".webp"} alt="" width={90} height={88} unoptimized /><span><small aria-hidden="true">{index+1}</small>{label}</span></div>)}</div>
+        </figure>
+      </section>
+      <section id="how-it-works" className="landing-process" aria-labelledby="process-heading">
+        <h2 id="process-heading">How it works</h2>
+        <p className="landing-section-intro">From farm registration to market scan, every step is signed, timestamped, and visible.</p>
+        <div className="landing-process-grid">{processCards.map(({number,title,copy}) => <article key={title} className="landing-process-card"><span className="landing-step">{number}</span><h3>{title}</h3><p>{copy}</p></article>)}</div>
+      </section>
+      <section className="landing-farmers" aria-labelledby="farmer-heading">
+        <div className="landing-farmer-copy">
+          <p className="landing-eyebrow">BUILT FOR AFRICA</p>
+          <h2 id="farmer-heading">Accessible to <span className="landing-green-text">every farmer</span></h2>
+          <p className="landing-description">Transparent produce. Trusted by nature. A mobile-first platform connecting farms, inspectors, regulators, and consumers.</p>
+          <div className="landing-feature-list">{features.map(({icon: Icon,title,copy}) => <article key={title} className="landing-feature-card"><span className="landing-feature-icon"><Icon aria-hidden="true" /></span><div><h3>{title}</h3><p>{copy}</p></div></article>)}</div>
+        </div>
+        <figure className="landing-phone"><Image src="/landing/agritrust-verification-phone.png" alt="Illustrative AgriTrust angled smartphone showing a produce verification journey with verified, traceability and on-chain badges" width={1254} height={1254} unoptimized /></figure>
+      </section>
+      <section className="landing-statistics" aria-label="Illustrative platform statistics">
+        <div className="landing-stats-grid">{stats.map(({value,label},index) => <div key={label} className={"landing-stat landing-stat-"+index}><strong>{value}</strong><span>{label}</span></div>)}</div>
+        <p>Illustrative figures · not live platform metrics</p>
+      </section>
+      <section className="landing-regulators" aria-labelledby="regulator-heading">
+        <div><p className="landing-eyebrow">FOR REGULATORS</p><h2 id="regulator-heading">Government-grade<br />oversight</h2><p className="landing-description">Real-time visibility into compliance, biosafety status, and supply chain activity across regions.</p><Link className="landing-text-link" href="/onboarding">For Regulators <span aria-hidden="true">↗</span></Link></div>
+        <figure className="landing-dashboard"><Image src="/landing/agritrust-regulator-dashboard.png" alt="Illustrative AgriTrust regulator dashboard with a Nigerian compliance map, batch volume chart, compliance ring and alerts table" width={1672} height={941} unoptimized /><figcaption>Illustrative dashboard preview · not live regulatory data</figcaption></figure>
+      </section>
+      <section className="landing-cta-section" aria-labelledby="cta-heading">
+        <div className="landing-cta landing-container">
+        <Image className="landing-cta-photo" src="/landing/farmer.webp" alt="Farmer holding freshly harvested vegetables in a field" width={290} height={192} unoptimized />
+        <div className="landing-cta-content"><h2 id="cta-heading">Start tracing your produce today</h2><p>Create a trusted produce passport and make every handoff visible from farm to market.</p><div className="landing-actions"><Link className="landing-button landing-button-green" href="/register">Get Started Free</Link><Link className="landing-button landing-button-outline" href="/verify/AGT-0042">Verify a Product</Link></div></div>
         </div>
       </section>
-
-      <section className="mt-20 flex items-center justify-center gap-0 px-8">
-        {flowSteps.map(({ icon: Icon, label, color }, index) => (
-          <div key={label} className="flex items-center">
-            <div className="flex flex-col items-center gap-2">
-              <div className={`flex h-16 w-16 items-center justify-center rounded-full border border-agri-border bg-agri-surface transition-all hover:scale-110 ${color === "text-accent-amber" ? "hover:glow-amber" : color === "text-accent-blue" ? "hover:glow-blue" : "hover:glow-green"}`}>
-                <Icon className={`h-7 w-7 ${color}`} />
-              </div>
-              <span className="mt-1 text-xs text-agri-muted">{label}</span>
-            </div>
-            {index < flowSteps.length - 1 ? (
-              <div className="w-12 self-center border-t-2 border-dashed border-accent-green/40 opacity-60" />
-            ) : null}
-          </div>
-        ))}
-      </section>
-
-      <section id="how-it-works" className="mt-24 bg-agri-surface py-20">
-        <h2
-          className="mb-4 text-center text-3xl font-bold text-agri-text"
-          style={{ fontFamily: "var(--font-outfit)" }}
-        >
-          How it works
-        </h2>
-        <p className="mb-16 text-center text-agri-muted">
-          From farm registration to market scan, every step is signed, timestamped, and visible.
-        </p>
-        <div className="mx-auto grid max-w-5xl grid-cols-1 gap-6 px-8 md:grid-cols-4">
-          {processCards.map(({ number, icon: Icon, color, title, copy }) => (
-            <article key={title} className="glass rounded-2xl border border-agri-border p-6 transition-all hover:-translate-y-1 hover:border-accent-blue/30">
-              <div className="mb-4 flex h-8 w-8 items-center justify-center rounded-full bg-accent-blue/20 text-sm font-bold text-accent-blue">
-                {number}
-              </div>
-              <Icon className={`h-6 w-6 ${color}`} />
-              <h3 className="mb-2 mt-3 font-semibold text-agri-text">{title}</h3>
-              <p className="text-sm text-agri-muted">{copy}</p>
-            </article>
-          ))}
+      <footer className="landing-footer">
+        <div className="landing-container landing-footer-top">
+          <div><BrandLogo size="sm" textClassName="text-xl" /><p>Transparent produce.<br />Trusted by nature.</p></div>
+          <div className="landing-footer-links"><div><a href="#how-it-works">How it works</a><Link href="/register">Farmers</Link></div><div><Link href="/onboarding">Regulators</Link><Link href="/verify/AGT-0042">Verify</Link></div><div><Link href="/login">Login</Link><Link href="/register">Get Started</Link></div><div><Link href="/help">Docs</Link></div></div>
         </div>
-      </section>
-
-      <section className="mx-auto flex max-w-6xl flex-col items-center gap-16 px-8 py-20 md:flex-row">
-        <div className="flex-1">
-          <h2
-            className="mb-6 text-3xl font-bold text-agri-text"
-            style={{ fontFamily: "var(--font-outfit)" }}
-          >
-            Accessible to every farmer
-          </h2>
-          {features.map(({ icon: Icon, color, bg, title, copy }) => (
-            <div key={title} className="mb-6 flex items-start gap-4">
-              <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${bg}`}>
-                <Icon className={`h-5 w-5 ${color}`} />
-              </div>
-              <div>
-                <h3 className="font-bold text-agri-text">{title}</h3>
-                <p className="text-sm text-agri-muted">{copy}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="glass w-72 shrink-0 rounded-3xl border-2 border-agri-border border-accent-green/20 bg-agri-surface p-5 shadow-[0_0_32px_rgba(34,197,94,0.15)]">
-          <div className="mb-3 flex items-center gap-2">
-            <ShieldCheck className="h-5 w-5 text-accent-green" />
-            <span className="text-xs font-bold text-accent-green">VERIFIED</span>
-          </div>
-          <h3 className="font-bold text-agri-text">Grade A Cocoa</h3>
-          <p className="mb-4 text-sm text-agri-muted">Okafor Family Farm</p>
-          <div className="flex items-center">
-            <span className="h-4 w-4 rounded-full bg-accent-green" />
-            <span className="h-px flex-1 bg-agri-border" />
-            <span className="h-4 w-4 rounded-full bg-accent-green" />
-            <span className="h-px flex-1 bg-agri-border" />
-            <span className="h-4 w-4 rounded-full bg-accent-green" />
-            <span className="h-px flex-1 bg-agri-border" />
-            <span className="h-4 w-4 animate-pulse rounded-full bg-accent-amber" />
-            <span className="h-px flex-1 bg-agri-border" />
-            <span className="h-4 w-4 rounded-full bg-agri-muted" />
-          </div>
-          <p className="mt-3 font-mono text-xs text-accent-cyan">AGT-0042</p>
-        </div>
-      </section>
-
-      <section className="relative overflow-hidden bg-agri-raised py-12">
-        <div className="hero-gradient pointer-events-none absolute inset-0" />
-        <div className="relative mx-auto flex max-w-4xl flex-col justify-center gap-10 px-8 sm:flex-row sm:gap-24">
-          {stats.map(({ value, label, color }) => (
-            <div key={label} className="text-center">
-              <div
-                className={`bg-gradient-to-r bg-clip-text text-4xl font-bold text-transparent ${
-                  color === "text-accent-green"
-                    ? "from-accent-green to-accent-blue"
-                    : color === "text-accent-purple"
-                      ? "from-accent-purple to-accent-blue"
-                      : "from-accent-blue to-accent-green"
-                }`}
-                style={{ fontFamily: "var(--font-outfit)" }}
-              >
-                {value}
-              </div>
-              <p className="mt-1 text-sm text-agri-muted">{label}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="px-8 py-20">
-        <div className="relative mx-auto max-w-3xl overflow-hidden rounded-3xl border border-agri-border border-accent-green/20 bg-gradient-to-br from-accent-green/10 via-accent-blue/5 to-accent-purple/10 p-12 text-center">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(34,197,94,0.18),transparent_55%)]" />
-          <h2
-            className="relative mb-4 text-3xl font-bold text-agri-text"
-            style={{ fontFamily: "var(--font-outfit)" }}
-          >
-            Start tracing your produce today
-          </h2>
-          <p className="relative mb-8 text-agri-muted">
-            Create a trusted produce passport and make every handoff visible from farm to market.
-          </p>
-          <div className="relative flex flex-wrap justify-center gap-4">
-            <Link className="rounded-xl bg-accent-green px-8 py-3 font-semibold text-white transition-shadow hover:shadow-[0_0_24px_rgba(34,197,94,0.4)]" href="/register">
-              Get Started Free
-            </Link>
-            <Link className="rounded-xl border border-agri-border px-8 py-3 font-semibold text-agri-text transition-shadow hover:shadow-[0_0_24px_rgba(59,130,246,0.3)]" href="/verify/AGT-0042">
-              Verify a Product
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      <footer className="border-t border-agri-border bg-agri-base px-8 py-12">
-        <div className="flex flex-col justify-between gap-10 md:flex-row md:items-start">
-          <div>
-            <BrandLogo size="md" textClassName="text-xl" />
-            <p className="mt-2 text-sm text-agri-muted">Transparent produce. Trusted by nature.</p>
-          </div>
-          <div className="grid grid-cols-4 gap-10 text-sm text-agri-muted">
-            <div className="flex flex-col gap-2">
-              <a className="hover:text-agri-text" href="#how-it-works">How it works</a>
-              <a className="hover:text-agri-text" href="/register">Farmers</a>
-            </div>
-            <div className="flex flex-col gap-2">
-              <a className="hover:text-agri-text" href="/onboarding">Regulators</a>
-              <Link className="hover:text-agri-text" href="/verify/AGT-0042">Verify</Link>
-            </div>
-            <div className="flex flex-col gap-2">
-              <a className="hover:text-agri-text" href="/login">Login</a>
-              <a className="hover:text-agri-text" href="/register">Get Started</a>
-            </div>
-            <div className="flex flex-col gap-2">
-              <Link className="hover:text-agri-text" href="/help">Docs</Link>
-            </div>
-          </div>
-          <p className="text-xs text-agri-muted">© 2026 AgriTrust. All rights reserved.</p>
-        </div>
+        <div className="landing-container landing-footer-bottom"><span>Every harvest. Every handoff. On-chain.</span><p>© 2026 AgriTrust. All rights reserved.</p></div>
       </footer>
     </main>
   );
