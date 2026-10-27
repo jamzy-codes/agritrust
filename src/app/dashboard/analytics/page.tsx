@@ -133,6 +133,8 @@ function FarmerAnalytics() {
       quantity_kg: number;
       status: string;
       registered_at: string | null;
+      inspected_at: string | null;
+      quality_grade: string | null;
     }>,
     timeline: [] as Array<{
       batch_id: string;
@@ -159,13 +161,14 @@ function FarmerAnalytics() {
         const { data: inspections, error: inspectionsError } = batchIds.length
           ? await supabase
             .from("inspections")
-            .select("batch_id, inspected_at, certificate_issued")
+            .select("batch_id, inspected_at, certificate_issued, quality_grade")
             .in("batch_id", batchIds)
             .eq("certificate_issued", true)
           : { data: [], error: null };
         if (inspectionsError) throw inspectionsError;
 
         const batchById = new Map((batches || []).map((batch) => [batch.batch_id, batch]));
+        const certificationByBatch = new Map((inspections || []).map((inspection) => [inspection.batch_id, inspection]));
         const certificationDurations = (inspections || [])
           .map((inspection) => {
             const batch = batchById.get(inspection.batch_id);
@@ -197,13 +200,18 @@ function FarmerAnalytics() {
           averageCertificationDays: certificationDurations.length
             ? certificationDurations.reduce((total, days) => total + days, 0) / certificationDurations.length
             : null,
-          batches: (batches || []).map((batch) => ({
-            batch_id: batch.batch_id,
-            crop_type: batch.crop_type || "Other",
-            quantity_kg: Number(batch.quantity_kg || 0),
-            status: batch.status || "REGISTERED",
-            registered_at: batch.registered_at,
-          })),
+          batches: (batches || []).map((batch) => {
+            const inspection = certificationByBatch.get(batch.batch_id);
+            return {
+              batch_id: batch.batch_id,
+              crop_type: batch.crop_type || "Other",
+              quantity_kg: Number(batch.quantity_kg || 0),
+              status: batch.status || "REGISTERED",
+              registered_at: batch.registered_at,
+              inspected_at: inspection?.inspected_at ?? null,
+              quality_grade: inspection?.quality_grade ?? null,
+            };
+          }),
           timeline,
         });
       } catch (error) {
@@ -279,7 +287,7 @@ function FarmerAnalytics() {
       icon: Leaf,
       value: isLoading ? "-" : String(farmerData.totalBatches),
       label: "Total batches",
-      trend: "+6.4% vs last 6 months",
+      trend: "Current records",
       trendTone: "green",
       iconColor: "text-accent-green",
       bgClassName: "card-gradient-green",
@@ -292,7 +300,7 @@ function FarmerAnalytics() {
         ? isLoading ? "-" : "0%"
         : `${((farmerData.certifiedBatches / farmerData.totalBatches) * 100).toFixed(1)}%`,
       label: "Compliance rate",
-      trend: "+2.3% vs last 6 months",
+      trend: "Current records",
       trendTone: "green",
       iconColor: "text-accent-green",
       bgClassName: "card-gradient-green",
@@ -303,7 +311,7 @@ function FarmerAnalytics() {
       icon: Scale,
       value: isLoading ? "-" : `${farmerData.totalProduceKg.toLocaleString()} kg`,
       label: "Total produce traced",
-      trend: "+1,120 kg",
+      trend: "Current records",
       trendTone: "green",
       iconColor: "text-accent-blue",
       bgClassName: "card-gradient-blue",
@@ -318,7 +326,7 @@ function FarmerAnalytics() {
           ? "—"
           : `${farmerData.averageCertificationDays.toFixed(1)} days`,
       label: "Avg. time to certification",
-      trend: "−0.6 days",
+      trend: "Current records",
       trendTone: "green",
       iconColor: "text-accent-amber",
       bgClassName: "card-gradient-amber",
@@ -606,137 +614,56 @@ function FarmerAnalytics() {
           </thead>
 
           <tbody>
-
-            {[
-
-              {
-
-                id: "AGT-0042",
-
-                crop: "Grade A Cocoa",
-
-                quantity: "500 kg",
-
-                days: "3 days",
-
-                tone: "green",
-
-                grade: "A+",
-
-              },
-
-              {
-
-                id: "AGT-0044",
-
-                crop: "Sesame Seeds",
-
-                quantity: "1,000 kg",
-
-                days: "4 days",
-
-                tone: "green",
-
-                grade: "A",
-
-              },
-
-              {
-
-                id: "AGT-0038",
-
-                crop: "Cassava",
-
-                quantity: "800 kg",
-
-                days: "5 days",
-
-                tone: "green",
-
-                grade: "A",
-
-              },
-
-              {
-
-                id: "AGT-0047",
-
-                crop: "Ginger",
-
-                quantity: "300 kg",
-
-                days: "8 days",
-
-                tone: "amber",
-
-                grade: "B+",
-
-              },
-
-              {
-
-                id: "AGT-0035",
-
-                crop: "Cashew",
-
-                quantity: "300 kg",
-
-                days: "10 days",
-
-                tone: "amber",
-
-                grade: "B+",
-
-              },
-
-            ].map((row) => (
-
-              <tr
-
-                key={row.id}
-
-                className="border-b border-agri-border last:border-0"
-
-              >
-
-                <td className="px-4 py-3 font-mono text-sm font-bold text-agri-text">
-
-                  {row.id}
-
+            {isLoading ? (
+              <tr>
+                <td colSpan={5} className="px-4 py-10 text-center text-sm text-agri-muted">
+                  Loading batch performance...
                 </td>
-
-                <td className="px-4 py-3 text-sm text-agri-text">{row.crop}</td>
-
-                <td className="px-4 py-3 text-sm text-agri-text">
-
-                  {row.quantity}
-
-                </td>
-
-                <td className="px-4 py-3 text-sm">
-
-                  <span
-
-                    className={`rounded-full px-2 py-0.5 text-xs font-bold ${row.tone === "green" ? "bg-accent-green/20 text-accent-green" : "bg-accent-amber/20 text-accent-amber"}`}
-
-                  >
-
-                    {row.days}
-
-                  </span>
-
-                </td>
-
-                <td className="px-4 py-3 text-sm text-agri-text">
-
-                  {row.grade}
-
-                </td>
-
               </tr>
+            ) : farmerData.batches.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-4 py-10 text-center text-sm text-agri-muted">
+                  No batch performance records are available yet.
+                </td>
+              </tr>
+            ) : (
+              farmerData.batches.slice(0, 5).map((batch) => {
+                const certificationDays =
+                  batch.registered_at && batch.inspected_at
+                    ? Math.max(
+                        0,
+                        Math.round(
+                          (new Date(batch.inspected_at).getTime() -
+                            new Date(batch.registered_at).getTime()) /
+                            86400000,
+                        ),
+                      )
+                    : null;
 
-            ))}
-
+                return (
+                  <tr
+                    key={batch.batch_id}
+                    className="border-b border-agri-border last:border-0"
+                  >
+                    <td className="px-4 py-3 font-mono text-sm font-bold text-agri-text">
+                      {batch.batch_id}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-agri-text">{batch.crop_type}</td>
+                    <td className="px-4 py-3 text-sm text-agri-text">
+                      {batch.quantity_kg.toLocaleString()} kg
+                    </td>
+                    <td className="px-4 py-3 text-sm text-agri-text">
+                      {certificationDays === null
+                        ? "N/A"
+                        : certificationDays + (certificationDays === 1 ? " day" : " days")}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-agri-text">
+                      {batch.quality_grade || "N/A"}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
 
         </table>
@@ -917,7 +844,7 @@ function RegulatorAnalytics() {
       icon: Users,
       value: isLoading ? "-" : String(regulatorData.activeFarms),
       label: "Active farms",
-      trend: "+2.6% this month",
+      trend: "Current records",
       trendTone: "green",
       iconColor: "text-accent-blue",
       bgClassName: "card-gradient-blue",
@@ -928,7 +855,7 @@ function RegulatorAnalytics() {
       icon: ShieldCheck,
       value: isLoading ? "-" : `${regulatorData.complianceRate.toFixed(1)}%`,
       label: "Network compliance rate",
-      trend: "+2.6%",
+      trend: "Current records",
       trendTone: "green",
       iconColor: "text-accent-green",
       bgClassName: "card-gradient-green",
@@ -939,7 +866,7 @@ function RegulatorAnalytics() {
       icon: Flag,
       value: isLoading ? "-" : String(regulatorData.activeFlags),
       label: "Active non-compliance flags",
-      trend: "▼ 8 resolved",
+      trend: "Current records",
       trendTone: "green",
       iconColor: "text-accent-red",
       bgClassName: "bg-gradient-to-br from-accent-red/8 to-agri-surface/95",
@@ -950,7 +877,7 @@ function RegulatorAnalytics() {
       icon: Box,
       value: isLoading ? "-" : String(regulatorData.blockchainTransactions),
       label: "Blockchain transactions",
-      trend: "+15.3%",
+      trend: "Current records",
       trendTone: "green",
       iconColor: "text-accent-purple",
       bgClassName: "card-gradient-purple",

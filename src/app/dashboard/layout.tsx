@@ -11,6 +11,7 @@ import { supabase } from "@/lib/supabase";
 import type { UserRole } from "@/types";
 
 interface CurrentUser {
+  userId: string;
   userName: string;
   email: string;
   role: UserRole;
@@ -72,6 +73,7 @@ export default function DashboardLayout({
       const userRole = profile.role as UserRole;
 
       setCurrentUser({
+        userId: userData.user.id,
         userName: name,
         email: profile.email ?? "",
         role: userRole,
@@ -82,6 +84,17 @@ export default function DashboardLayout({
 
     loadUser();
   }, [router]);
+
+  useEffect(() => {
+    if (!isMobileOpen) return;
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setIsMobileOpen(false);
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isMobileOpen]);
 
   useEffect(() => {
     if (!isLoading && currentUser && !canAccessRoute(pathname, currentUser.role)) {
@@ -140,25 +153,30 @@ export default function DashboardLayout({
       <div className="fixed inset-0 -z-10 bg-agri-base">
         <div className="absolute top-0 left-65px right-0 h-125px hero-gradient opacity-60 pointer-events-none" />
       </div>
-      <Sidebar role={currentUser?.role} isMobileOpen={isMobileOpen} />
+      <Sidebar
+        role={currentUser?.role}
+        isMobileOpen={isMobileOpen}
+        onNavigate={() => setIsMobileOpen(false)}
+      />
       {isMobileOpen && (
         <button
           type="button"
           aria-label="Close mobile navigation"
-          className="fixed bottom-0 left-0 right-0 top-16 z-40 bg-black/60 lg:hidden"
+          className="fixed bottom-0 left-0 right-0 top-28 z-40 bg-black/60 lg:top-16 lg:hidden"
           onClick={() => setIsMobileOpen(false)}
         />
       )}
 
       <div className="min-h-screen lg:ml-14">
         <TopBar
+          authenticatedUserId={currentUser?.userId}
           onMenuClick={() => setIsMobileOpen((current) => !current)}
           userName={currentUser?.userName}
           email={currentUser?.email}
           role={currentUser?.role}
           initials={currentUser?.initials}
         />
-        <main className="min-h-screen pt-16">{children}</main>
+        <main className="min-h-screen pt-28 lg:pt-16">{children}</main>
       </div>
     </div>
   );

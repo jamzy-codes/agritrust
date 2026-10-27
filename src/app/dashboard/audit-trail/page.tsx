@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, FileText, History, Lock, ShieldAlert } from "lucide-react";
+import { ExternalLink, FileText, History, Lock } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -149,10 +149,14 @@ export default function AuditTrailPage() {
     loadAndVerifyRegulator();
   }, [router]);
 
+  const verifiedTransactions = events.filter((event) => Boolean(event.hash)).length;
+  const verificationRate = totalActions > 0
+    ? `${Math.round((verifiedTransactions / totalActions) * 100)}%`
+    : "N/A";
   const stats = [
     { value: totalActions.toLocaleString(), label: "Total on-chain transactions" },
     { value: activeWallets.toString(), label: "Active network actors" },
-    { value: "100%", label: "Verified on Polygon Amoy" },
+    { value: verificationRate, label: "Verified on Polygon Amoy" },
   ];
 
   return (

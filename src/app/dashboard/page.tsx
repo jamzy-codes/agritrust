@@ -3,11 +3,9 @@
 import {
   AlertTriangle,
   Award,
-  Bell,
   CheckCircle2,
   ClipboardCheck,
   Clock,
-  FileText,
   Globe,
   Link as ChainLink,
   MapPin,
@@ -33,17 +31,9 @@ import type { UserRole } from "@/types";
 import { MiniTimeline } from "@/components/ui/MiniTimeline";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { fetchRealAlerts, type RealAlert } from "@/lib/alerts";
+import { fetchRealAlerts, logAlertsError, type RealAlert } from "@/lib/alerts";
 import { supabase } from "@/lib/supabase";
 
-
-const regionData = [
-  { state: "Rivers State", compliance: 99.1 },
-  { state: "Lagos", compliance: 98.4 },
-  { state: "Kano", compliance: 97.6 },
-  { state: "Oyo", compliance: 96.8 },
-  { state: "Kaduna", compliance: 95.3 },
-];
 
 interface StatCardProps {
   icon: LucideIcon;
@@ -209,7 +199,7 @@ function FarmerDashboard() {
             className="text-3xl font-bold text-agri-text"
             style={{ fontFamily: "var(--font-outfit)" }}
           >
-            Good morning, {firstName}
+            Good day, {firstName}
           </h1>
           <p className="mt-1 text-agri-muted">Here&apos;s your farm activity overview.</p>
         </div>
@@ -337,23 +327,53 @@ function RegulatorDashboard() {
     activeFarms: 0,
   });
   const [recentAlerts, setRecentAlerts] = useState<RealAlert[]>([]);
+  const [regionData, setRegionData] = useState<Array<{ state: string; compliance: number; batches: number }>>([]);
 
   useEffect(() => {
     async function loadRegulatorStats() {
       try {
-        const [compliantResult, flaggedResult, farmsResult] = await Promise.all([
+        const [compliantResult, flaggedResult, farmsResult, regionalResult] = await Promise.all([
           supabase.from("batches").select("id", { count: "exact", head: true }).eq("status", "CERTIFIED"),
           supabase.from("batches").select("id", { count: "exact", head: true }).eq("status", "FLAGGED"),
           supabase.from("farms").select("id", { count: "exact", head: true }),
+          supabase.from("batches").select("status, farms(location)"),
         ]);
 
-        const queryError = compliantResult.error || flaggedResult.error || farmsResult.error;
+        const queryError =
+          compliantResult.error ||
+          flaggedResult.error ||
+          farmsResult.error ||
+          regionalResult.error;
         if (queryError) {
           console.error("Error loading regulator dashboard statistics:", queryError);
           return;
         }
 
-        const liveAlerts = await fetchRealAlerts("REGULATOR");
+        const regionalTotals = new Map<string, { total: number; compliant: number }>();
+        for (const batch of regionalResult.data ?? []) {
+          const farmRelation = Array.isArray(batch.farms) ? batch.farms[0] : batch.farms;
+          const state = farmRelation?.location?.trim() || "Unspecified region";
+          const current = regionalTotals.get(state) ?? { total: 0, compliant: 0 };
+          current.total += 1;
+          if (batch.status === "CERTIFIED" || batch.status === "DELIVERED") {
+            current.compliant += 1;
+          }
+          regionalTotals.set(state, current);
+        }
+        const liveRegionData = Array.from(regionalTotals.entries())
+          .map(([state, totals]) => ({
+            state,
+            compliance: Math.round((totals.compliant / totals.total) * 1000) / 10,
+            batches: totals.total,
+          }))
+          .sort((first, second) => second.compliance - first.compliance)
+          .slice(0, 5);
+        let liveAlerts: RealAlert[] = [];
+        try {
+          liveAlerts = await fetchRealAlerts("REGULATOR");
+        } catch (alertErr) {
+          logAlertsError("Error loading live alerts for regulator overview", alertErr);
+        }
 
         setStatsData({
           compliantBatches: compliantResult.count || 0,
@@ -362,6 +382,7 @@ function RegulatorDashboard() {
           activeFarms: farmsResult.count || 0,
         });
         setRecentAlerts(liveAlerts.slice(0, 4));
+        setRegionData(liveRegionData);
       } finally {
         setIsLoading(false);
       }
@@ -413,35 +434,7 @@ function RegulatorDashboard() {
     },
   ];
 
-  const greenDots = [
-    "left-[18%] top-[24%]",
-    "left-[26%] top-[42%]",
-    "left-[36%] top-[30%]",
-    "left-[45%] top-[54%]",
-    "left-[56%] top-[36%]",
-    "left-[63%] top-[62%]",
-    "left-[71%] top-[45%]",
-    "left-[77%] top-[28%]",
-    "left-[21%] top-[65%]",
-    "left-[32%] top-[72%]",
-    "left-[49%] top-[22%]",
-    "left-[54%] top-[76%]",
-    "left-[66%] top-[18%]",
-    "left-[82%] top-[58%]",
-    "left-[14%] top-[48%]",
-    "left-[40%] top-[82%]",
-    "left-[72%] top-[74%]",
-    "left-[88%] top-[39%]",
-  ];
-  const amberDots = [
-    "left-[29%] top-[23%]",
-    "left-[58%] top-[48%]",
-    "left-[69%] top-[33%]",
-    "left-[22%] top-[78%]",
-    "left-[83%] top-[69%]",
-    "left-[43%] top-[64%]",
-  ];
-  const redDots = ["left-[34%] top-[52%]", "left-[74%] top-[59%]"];
+
 
   return (
     <div className="px-8 pb-8 pt-8">
@@ -468,34 +461,40 @@ function RegulatorDashboard() {
               <h2 className="text-base font-semibold text-agri-text">Compliance network map</h2>
               <p className="text-xs text-agri-muted">Live data from blockchain state.</p>
             </div>
-            <div className="relative h-64 overflow-hidden rounded-lg bg-agri-raised">
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(34,197,94,0.08),transparent_60%)]" />
-              <span className="absolute left-1/2 top-1/2 z-0 -translate-x-1/2 -translate-y-1/2 text-6xl font-bold text-agri-muted/30">
-                Nigeria
-              </span>
-              {greenDots.map((position) => (
-                <span key={position} className={`absolute h-2 w-2 rounded-full bg-accent-green shadow-[0_0_18px_rgba(34,197,94,0.45)] ${position}`} />
-              ))}
-              {amberDots.map((position) => (
-                <span key={position} className={`absolute h-2 w-2 rounded-full bg-accent-amber shadow-[0_0_18px_rgba(245,158,11,0.45)] ${position}`} />
-              ))}
-              {redDots.map((position) => (
-                <span key={position} className={`absolute h-2 w-2 rounded-full bg-accent-red shadow-[0_0_18px_rgba(239,68,68,0.45)] ${position}`} />
-              ))}
-              <div className="absolute bottom-3 right-3 flex gap-4 rounded-lg bg-agri-surface/80 px-3 py-2 backdrop-blur-sm">
-                {[
-                  ["bg-accent-green", "Compliant"],
-                  ["bg-accent-amber", "Review"],
-                  ["bg-accent-red", "Alert"],
-                ].map(([dot, label]) => (
-                  <span key={label} className="flex items-center gap-2 text-xs text-agri-muted">
-                    <span className={`h-2 w-2 rounded-full ${dot}`} />
-                    {label}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
+            <div className="min-h-64 overflow-hidden rounded-lg bg-agri-raised p-5">
+              {isLoading ? (
+                <p className="py-20 text-center text-sm text-agri-muted">Loading regional coverage...</p>
+              ) : regionData.length === 0 ? (
+                <p className="py-20 text-center text-sm text-agri-muted">
+                  No regional batch data is available yet.
+                </p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {regionData.map((region) => {
+                    const tone =
+                      region.compliance >= 90
+                        ? "bg-accent-green"
+                        : region.compliance >= 70
+                          ? "bg-accent-amber"
+                          : "bg-accent-red";
+                    return (
+                      <div
+                        key={region.state}
+                        className="flex items-center gap-3 rounded-lg border border-agri-border bg-agri-surface/70 px-4 py-3"
+                      >
+                        <span className={"h-2.5 w-2.5 shrink-0 rounded-full " + tone} />
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-agri-text">{region.state}</p>
+                          <p className="text-xs text-agri-muted">
+                            {region.compliance}% compliant · {region.batches} batches
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>          </div>
         </GradientCard>
       </section>
 
@@ -542,7 +541,7 @@ function RegulatorDashboard() {
                 <BarChart data={regionData} layout="vertical" margin={{ left: 8, right: 16 }}>
                   <CartesianGrid horizontal={false} stroke="#2a2a3e" />
                   <XAxis
-                    domain={[90, 100]}
+                    domain={[0, 100]}
                     tickFormatter={(value) => `${value}%`}
                     type="number"
                     tick={{ fill: "#6b6b80", fontSize: 12 }}
@@ -668,7 +667,7 @@ function InspectorDashboard() {
     },
     {
       icon: ShieldCheck,
-      value: "100%",
+      value: totalInspections > 0 ? `${Math.round((totalCerts / totalInspections) * 100)}%` : "N/A",
       label: "Verification rate",
       iconBg: "bg-accent-purple/10",
       iconColor: "text-accent-purple",
@@ -696,7 +695,7 @@ function InspectorDashboard() {
             className="text-3xl font-bold text-agri-text"
             style={{ fontFamily: "var(--font-outfit)" }}
           >
-            Good morning, {firstName}
+            Good day, {firstName}
           </h1>
           <p className="mt-1 text-agri-muted">Here&apos;s your biosafety inspection overview.</p>
         </div>
@@ -923,7 +922,7 @@ function DistributorDashboard() {
             className="text-3xl font-bold text-agri-text"
             style={{ fontFamily: "var(--font-outfit)" }}
           >
-            Good morning, {firstName}
+            Good day, {firstName}
           </h1>
           <p className="mt-1 text-agri-muted">Here&apos;s your logistics & custody transfer overview.</p>
         </div>
