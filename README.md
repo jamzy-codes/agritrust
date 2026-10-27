@@ -126,6 +126,7 @@ Create a `.env.local` file in the project root. You'll need the following:
 ```
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+NEXT_PUBLIC_APP_URL=https://your-public-app.example
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
 
@@ -277,6 +278,7 @@ Creates a new user account with immediate confirmation (no email verification re
 |----------|-------------|
 | `NEXT_PUBLIC_SUPABASE_URL` | URL of your Supabase project |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anonymous key for client-side queries |
+| `NEXT_PUBLIC_APP_URL` | Public deployment origin used in verification QR codes and copied links |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key for admin operations |
 | `PRIVATE_KEY` | Wallet private key for contract deployment (blockchain) |
 | `AMOY_RPC_URL` | RPC URL for Polygon Amoy testnet (blockchain) |

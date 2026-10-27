@@ -22,16 +22,13 @@ export function canAccessRoute(pathname: string | null | undefined, role?: UserR
     return false;
   }
 
-  const matchingRoute = Object.entries(DASHBOARD_ROUTE_ACCESS).find(([route]) => {
-    if (route === "/dashboard") {
-      return pathname === route || pathname.startsWith("/dashboard/");
-    }
-
-    return pathname === route || pathname.startsWith(`${route}/`);
-  });
+  const matchingRoute = Object.entries(DASHBOARD_ROUTE_ACCESS)
+    .filter(([route]) => route !== "/dashboard")
+    .sort(([firstRoute], [secondRoute]) => secondRoute.length - firstRoute.length)
+    .find(([route]) => pathname === route || pathname.startsWith(`${route}/`));
 
   if (!matchingRoute) {
-    return pathname === "/dashboard" ? true : false;
+    return pathname === "/dashboard" || pathname.startsWith("/dashboard/");
   }
 
   return matchingRoute[1].includes(role);

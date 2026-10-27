@@ -3,7 +3,12 @@
 import Link from "next/link";
 import { useRef } from "react";
 
-export default function LandingMobileMenu({ items }: { items: readonly string[] }) {
+interface NavigationItem {
+  label: string;
+  href: string;
+}
+
+export default function LandingMobileMenu({ items }: { items: readonly NavigationItem[] }) {
   const menuRef = useRef<HTMLDetailsElement>(null);
 
   function closeMenu() {
@@ -27,7 +32,7 @@ export default function LandingMobileMenu({ items }: { items: readonly string[] 
       </summary>
       <div className="landing-mobile-links">
         {items.map((item) => (
-          <a key={item} href="#how-it-works" onClick={closeMenu}>{item}</a>
+          <a key={item.label} href={item.href} onClick={closeMenu}>{item.label}</a>
         ))}
         <Link href="/register" onClick={closeMenu}>Get Started</Link>
       </div>

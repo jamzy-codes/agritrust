@@ -19,12 +19,14 @@ import { supabase } from "@/lib/supabase";
 import {
   fetchRealAlerts,
   getLastViewedAlertsAt,
+  logAlertsError,
   markAlertsAsViewed,
   type RealAlert,
 } from "@/lib/alerts";
 import type { UserRole } from "@/types";
 
 interface TopBarProps {
+  authenticatedUserId?: string;
   searchPlaceholder?: string;
   userName?: string;
   email?: string;
@@ -52,6 +54,7 @@ const roleStyles: Record<UserRole, { avatar: string }> = {
 };
 
 export default function TopBar({
+  authenticatedUserId,
   searchPlaceholder = "Search AgriTrust...",
   userName = "User",
   email = "innovaro@gmail.com",
@@ -63,48 +66,84 @@ export default function TopBar({
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [alerts, setAlerts] = useState<RealAlert[]>([]);
   const [unreadCount, setUnreadCount] = useState<number>(0);
-  const [userId, setUserId] = useState<string | null>(null);
+  const [alertsError, setAlertsError] = useState<string | null>(null);
 
   const styles = roleStyles[role];
   const router = useRouter();
 
   useEffect(() => {
+    let isActive = true;
+    let isFetching = false;
+
     async function loadAlerts() {
-      const { data: userData } = await supabase.auth.getUser();
-      const currentUserId = userData.user?.id || null;
-      setUserId(currentUserId);
+      if (isFetching) return;
+      isFetching = true;
 
-      const realAlerts = await fetchRealAlerts(role, currentUserId || undefined);
-      setAlerts(realAlerts);
-
-      if (currentUserId) {
-        const lastViewedAt = await getLastViewedAlertsAt(currentUserId);
-        if (!lastViewedAt) {
-          setUnreadCount(realAlerts.length);
-        } else {
-          const unread = realAlerts.filter(
-            (a) => new Date(a.rawTime).getTime() > new Date(lastViewedAt).getTime(),
-          ).length;
-          setUnreadCount(unread);
+      try {
+        const currentUserId = authenticatedUserId ?? null;
+        if (!currentUserId) {
+          if (!isActive) return;
+          setAlerts([]);
+          setUnreadCount(0);
+          setAlertsError(null);
+          return;
         }
-      } else {
-        setUnreadCount(realAlerts.length);
+        const realAlerts = await fetchRealAlerts(role, currentUserId || undefined);
+        if (!isActive) return;
+        setAlerts(realAlerts);
+        setAlertsError(null);
+
+        if (currentUserId) {
+          const lastViewedAt = await getLastViewedAlertsAt(currentUserId);
+          if (!isActive) return;
+
+          const unread = lastViewedAt
+            ? realAlerts.filter(
+                (alert) => new Date(alert.rawTime).getTime() > new Date(lastViewedAt).getTime(),
+              ).length
+            : realAlerts.length;
+          setUnreadCount(unread);
+        } else {
+          setUnreadCount(realAlerts.length);
+        }
+      } catch (error) {
+        logAlertsError("Error loading notification alerts in TopBar", error);
+        if (isActive) setAlertsError("Alerts could not be refreshed.");
+      } finally {
+        isFetching = false;
       }
     }
 
     loadAlerts();
-    const interval = setInterval(loadAlerts, 30000);
-    return () => clearInterval(interval);
-  }, [role]);
+    const interval = window.setInterval(loadAlerts, 30000);
+    return () => {
+      isActive = false;
+      window.clearInterval(interval);
+    };
+  }, [authenticatedUserId, role]);
+
+  useEffect(() => {
+    if (!isAlertsOpen && !isProfileOpen) return;
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsAlertsOpen(false);
+        setIsProfileOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isAlertsOpen, isProfileOpen]);
 
   const handleToggleAlerts = async () => {
     setIsProfileOpen(false);
     const nextState = !isAlertsOpen;
     setIsAlertsOpen(nextState);
 
-    if (nextState && userId) {
+    if (nextState && authenticatedUserId) {
       setUnreadCount(0);
-      await markAlertsAsViewed(userId);
+      await markAlertsAsViewed(authenticatedUserId);
     }
   };
 
@@ -127,41 +166,40 @@ export default function TopBar({
         />
       )}
 
-      <header className="fixed left-0 right-0 top-0 z-30 flex h-16 items-center gap-4 border-b  border-white/5 bg-agri-surface/85 px-6 shadow-[0_12px_40px_rgba(0,0,0,0.18)] backdrop-blur-xl">
+      <header className="fixed inset-x-0 top-0 z-30 flex h-28 flex-wrap items-center gap-x-2 gap-y-2 border-b border-white/5 bg-agri-surface/90 px-3 py-2 shadow-[0_12px_40px_rgba(0,0,0,0.18)] backdrop-blur-xl sm:px-4 lg:h-16 lg:flex-nowrap lg:gap-4 lg:px-6 lg:py-0">
         <button
           type="button"
-          className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-agri-muted hover:bg-agri-raised hover:text-agri-text lg:hidden"
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-agri-muted hover:bg-agri-raised hover:text-agri-text lg:hidden"
           onClick={onMenuClick}
-          aria-label="Open navigation"
+          aria-label="Toggle navigation"
         >
           <Menu className="h-5 w-5" />
         </button>
 
-        <BrandLogo className="lg:-ml-4" size="md" />
+        <BrandLogo className="shrink-0 lg:-ml-4" size="sm" />
 
-        <div className="mx-auto max-w-md flex-1">
+        <div className="order-3 w-full flex-none lg:order-none lg:mx-auto lg:max-w-md lg:flex-1">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-agri-muted" />
             <input
-              className="w-full rounded-lg border border-agri-border bg-agri-raised py-2 pl-9 pr-14 text-sm text-agri-text placeholder:text-agri-muted transition-colors focus:border-agri-border-focus focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)]"
+              className="w-full rounded-lg border border-agri-border bg-agri-raised py-2 pl-9 pr-4 text-sm text-agri-text placeholder:text-agri-muted transition-colors focus:border-agri-border-focus focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)]"
               placeholder={searchPlaceholder}
               type="search"
             />
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 rounded border border-agri-border bg-agri-overlay px-1.5 py-0.5 font-mono text-[10px] text-agri-muted">
-              ⌘K
-            </span>
           </div>
         </div>
 
-        <div className="ml-auto flex items-center gap-4">
+        <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3 lg:gap-4">
           <div className="relative">
             <button
               type="button"
-              className="relative cursor-pointer p-1"
+              className="relative inline-flex h-10 w-10 items-center justify-center rounded-lg text-agri-muted transition-colors hover:bg-agri-raised hover:text-agri-text"
               onClick={handleToggleAlerts}
               aria-label="Alerts"
+              aria-expanded={isAlertsOpen}
+              aria-haspopup="dialog"
             >
-              <Bell className="h-5 w-5 text-agri-muted hover:text-agri-text" />
+              <Bell className="h-5 w-5" />
               {unreadCount > 0 && (
                 <span className="absolute right-0 top-0 flex h-4 min-w-4px items-center justify-center rounded-full bg-accent-red px-1 text-[10px] font-bold text-white shadow-sm animate-pulse">
                   {unreadCount > 9 ? "9+" : unreadCount}
@@ -171,7 +209,7 @@ export default function TopBar({
 
             {isAlertsOpen && (
               <div
-                className="absolute right-0 top-12 z-50 w-80 overflow-hidden rounded-xl border border-agri-border bg-agri-surface shadow-xl"
+                className="fixed left-3 right-3 top-28 z-50 overflow-hidden rounded-xl border border-agri-border bg-agri-surface shadow-xl sm:left-auto sm:right-4 sm:w-80 lg:absolute lg:right-0 lg:top-12"
                 onClick={(event) => event.stopPropagation()}
               >
                 <div className="flex items-center justify-between border-b border-agri-border px-4 py-3">
@@ -183,7 +221,9 @@ export default function TopBar({
                   </span>
                 </div>
 
-                {alerts.length === 0 ? (
+                {alertsError ? (
+                  <div className="p-6 text-center text-xs text-accent-red">{alertsError}</div>
+                ) : alerts.length === 0 ? (
                   <div className="p-6 text-center text-xs text-agri-muted">
                     No active alerts at this time.
                   </div>
@@ -229,10 +269,10 @@ export default function TopBar({
                   className="block border-t border-agri-border px-4 py-3 text-center text-sm font-medium text-accent-blue hover:bg-agri-raised"
                   onClick={async () => {
                     setIsAlertsOpen(false);
-                    if (userId) await markAlertsAsViewed(userId);
+                    if (authenticatedUserId) await markAlertsAsViewed(authenticatedUserId);
                   }}
                 >
-                  View all alerts →
+                  View all alerts &rarr;
                 </Link>
               </div>
             )}
@@ -240,18 +280,21 @@ export default function TopBar({
           <div className="relative">
             <button
               type="button"
-              className="ml-1 flex cursor-pointer items-center gap-2.5 border-l border-agri-border pl-3 transition-opacity hover:opacity-80"
+              className="flex min-h-10 cursor-pointer items-center gap-2 rounded-lg transition-colors hover:bg-agri-raised sm:border-l sm:border-agri-border sm:pl-3 lg:gap-2.5"
               onClick={() => {
                 setIsAlertsOpen(false);
                 setIsProfileOpen((current) => !current);
               }}
+              aria-label="Open profile menu"
+              aria-expanded={isProfileOpen}
+              aria-haspopup="menu"
             >
               <div
                 className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${styles.avatar}`}
               >
                 {initials}
               </div>
-              <div className="text-left">
+              <div className="hidden text-left md:block">
                 <p className="text-sm font-medium leading-tight text-agri-text">
                   {userName}
                 </p>
@@ -260,14 +303,14 @@ export default function TopBar({
                 </p>
               </div>
               <ChevronDown
-                className={`ml-1 h-3.5 w-3.5 shrink-0 text-agri-muted transition-transform duration-200 ${isProfileOpen ? "rotate-180" : ""
+                className={`ml-1 hidden h-3.5 w-3.5 shrink-0 text-agri-muted sm:block transition-transform duration-200 ${isProfileOpen ? "rotate-180" : ""
                   }`}
               />
             </button>
 
             {isProfileOpen && (
               <div
-                className="absolute right-0 top-14 z-50 w-56 overflow-hidden rounded-xl border border-agri-border bg-agri-surface shadow-xl"
+                className="fixed left-3 right-3 top-28 z-50 overflow-hidden rounded-xl border border-agri-border bg-agri-surface shadow-xl sm:left-auto sm:right-4 sm:w-56 lg:absolute lg:right-0 lg:top-14"
                 onClick={(event) => event.stopPropagation()}
               >
                 <div className="border-b border-agri-border px-4 py-3">

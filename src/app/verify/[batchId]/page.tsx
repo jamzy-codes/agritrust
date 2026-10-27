@@ -1,15 +1,12 @@
 import Link from "next/link";
 import {
   AlertCircle,
-  Copy,
-  Download,
   ExternalLink,
   Globe,
   Info,
   Leaf,
   Link2,
   MapPin,
-  QrCode,
   Scale,
   ShieldCheck,
   Star,
@@ -18,6 +15,7 @@ import {
 } from "lucide-react";
 
 import BrandLogo from "@/components/brand/BrandLogo";
+import VerificationQr from "@/components/verification/VerificationQr";
 import { supabase } from "@/lib/supabase";
 
 function MiniTimeline({
@@ -361,28 +359,14 @@ export default async function VerifyBatchPage({
             <p className="mb-3 text-xs font-bold tracking-wide text-agri-text">
               SHARE THIS VERIFICATION
             </p>
-            <div className="mx-auto mb-3 flex h-32 w-32 items-center justify-center rounded-xl border border-agri-border bg-agri-raised">
-              <QrCode className="h-12 w-12 text-agri-muted" />
-            </div>
             <p className="mb-4 text-center text-xs text-agri-muted">
               Share this public link for anyone to verify this produce&apos;s origin.
             </p>
-            <div className="flex flex-col gap-2">
-              <button
-                className="flex items-center justify-center gap-2 rounded-lg border border-agri-border py-2 text-sm text-agri-text hover:bg-agri-raised"
-                type="button"
-              >
-                <Copy className="h-4 w-4" />
-                Copy link
-              </button>
-              <button
-                className="flex items-center justify-center gap-2 rounded-lg border border-agri-border py-2 text-sm text-agri-text hover:bg-agri-raised"
-                type="button"
-              >
-                <Download className="h-4 w-4" />
-                Download PDF
-              </button>
-            </div>
+            <VerificationQr
+              batchId={batch.batch_id}
+              showOpenAction
+              showPrintAction
+            />
           </div>
         </div>
       </section>

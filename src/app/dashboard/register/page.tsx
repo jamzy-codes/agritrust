@@ -21,7 +21,13 @@ import {
   Wallet,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useAccount, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
+import {
+  useAccount,
+  usePublicClient,
+  useWaitForTransactionReceipt,
+  useWalletClient,
+  useWriteContract,
+} from "wagmi";
 
 import {
   complianceRegistryContract,
@@ -30,10 +36,13 @@ import {
 } from "@/lib/contracts";
 import { PRIMARY_BATCH, TX_HASHES } from "@/lib/mockData";
 import { supabase } from "@/lib/supabase";
+import { wagmiConfig } from "@/lib/wagmi";
+import VerificationQr from "@/components/verification/VerificationQr";
 import type { UserRole } from "@/types";
 
 type ActiveTab = "new" | "verify" | "handoff";
 type GMOResult = "NON_GMO" | "GMO_PRESENT";
+type InspectionFlowMode = "record" | "certificate_recovery" | "sync_recovery" | "complete";
 type HandoffType =
   | "Warehouse to Distributor"
   | "Distributor to Distributor"
@@ -62,6 +71,215 @@ const roleTabs: Record<UserRole, ActiveTab[]> = {
   REGULATOR: [],
   CONSUMER: [],
 };
+
+const POLYGON_AMOY_CHAIN_ID = 80002;
+
+function errorText(error: unknown): string {
+  const messages: string[] = [];
+  let current: unknown = error;
+
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    if (typeof current === "object") {
+      const value = current as Record<string, unknown>;
+      for (const key of ["reason", "shortMessage", "details", "message"]) {
+        if (typeof value[key] === "string") messages.push(value[key]);
+      }
+      current = value.cause;
+    } else {
+      messages.push(String(current));
+      break;
+    }
+  }
+
+  return messages.join(" | ");
+}
+
+interface SafeContractError {
+  name: string;
+  shortMessage: string | null;
+  message: string;
+  code: string | number | null;
+  causes: Array<{
+    name: string;
+    shortMessage: string | null;
+    message: string;
+    code: string | number | null;
+  }>;
+}
+
+function redactErrorMessage(message: string): string {
+  return message
+    .replace(/https?:\/\/\S+/gi, "[redacted-url]")
+    .replace(/(authorization|apikey|api_key)\s*[:=]\s*\S+/gi, "$1=[redacted]");
+}
+
+function safeContractError(error: unknown): SafeContractError {
+  const values: Array<Record<string, unknown>> = [];
+  let current = error;
+
+  for (let depth = 0; depth < 5 && typeof current === "object" && current; depth += 1) {
+    const value = current as Record<string, unknown>;
+    values.push(value);
+    current = value.cause;
+  }
+
+  const normalize = (value: Record<string, unknown>) => ({
+    name: typeof value.name === "string" ? value.name : "Error",
+    shortMessage:
+      typeof value.shortMessage === "string"
+        ? redactErrorMessage(value.shortMessage)
+        : null,
+    message:
+      typeof value.message === "string"
+        ? redactErrorMessage(value.message)
+        : "Unknown contract error",
+    code:
+      typeof value.code === "string" || typeof value.code === "number"
+        ? value.code
+        : null,
+  });
+  const [
+    root = {
+      name: "Error",
+      shortMessage: null,
+      message: "Unknown contract error",
+      code: null,
+    },
+    ...causes
+  ] = values.map(normalize);
+
+  return { ...root, causes };
+}
+
+function certificateSubmissionErrorMessage(error: unknown): string {
+  const details = safeContractError(error);
+  const combined = [
+    details.name,
+    details.shortMessage,
+    details.message,
+    ...details.causes.flatMap((cause) => [
+      cause.name,
+      cause.shortMessage,
+      cause.message,
+      String(cause.code ?? ""),
+    ]),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (combined.includes("user rejected") || combined.includes("user denied") || details.code === 4001) {
+    return "Certificate submission was rejected in the wallet. The inspection remains recorded.";
+  }
+  if (combined.includes("connectoraccountnotfound")) {
+    return "The connected wallet account changed before submission. Reconnect the approved Inspector wallet and retry certificate issuance.";
+  }
+  if (
+    combined.includes("connectornotconnected") ||
+    combined.includes("providerdisconnected") ||
+    combined.includes("connector unavailable")
+  ) {
+    return "The wallet connector is no longer available. Reconnect the approved Inspector wallet and retry certificate issuance.";
+  }
+  if (
+    combined.includes("chainmismatch") ||
+    combined.includes("chain mismatch") ||
+    combined.includes("unsupported chain")
+  ) {
+    return "The wallet client is not on Polygon Amoy. Switch to chain 80002 and retry certificate issuance.";
+  }
+  if (
+    combined.includes("failed to fetch") ||
+    combined.includes("network") ||
+    combined.includes("httprequesterror") ||
+    combined.includes("rpcrequesterror")
+  ) {
+    return "The wallet RPC could not submit the certificate transaction. Check the Polygon Amoy connection and retry; the inspection will not be repeated.";
+  }
+
+  return (
+    "Wallet submission failed before a transaction hash was returned (" +
+    details.name +
+    "). Reconnect the approved Inspector wallet and retry certificate issuance."
+  );
+}
+interface InspectionSyncResponse {
+  batchId: string;
+  synchronized: boolean;
+  mismatches: string[];
+  blockchain: {
+    inspectionTransactionHash: `0x${string}`;
+    certificateTransactionHash: `0x${string}`;
+  };
+}
+
+async function requestInspectionSynchronization(
+  batchId: string,
+  method: "GET" | "POST",
+): Promise<InspectionSyncResponse> {
+  const { data, error } = await supabase.auth.getSession();
+  if (error || !data.session?.access_token) {
+    throw new Error("Your Inspector session is unavailable. Sign in again and retry synchronization.");
+  }
+
+  const query = method === "GET" ? `?batchId=${encodeURIComponent(batchId)}` : "";
+  const response = await fetch(`/api/sync/inspection${query}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${data.session.access_token}`,
+      ...(method === "POST" ? { "Content-Type": "application/json" } : {}),
+    },
+    ...(method === "POST" ? { body: JSON.stringify({ batchId }) } : {}),
+  });
+  const body = (await response.json().catch(() => null)) as
+    | (InspectionSyncResponse & { error?: string; stage?: string })
+    | null;
+  if (!response.ok || !body) {
+    const stage = body?.stage ? ` (${body.stage})` : "";
+    throw new Error((body?.error || "Synchronization request failed.") + stage);
+  }
+  return body;
+}
+function inspectionErrorMessage(error: unknown, action: "inspection" | "certificate"): string {
+  const message = errorText(error).toLowerCase();
+
+  if (message.includes("user rejected") || message.includes("user denied")) {
+    return action === "inspection"
+      ? "Transaction was rejected in your wallet."
+      : "Inspection was recorded, but certificate issuance was rejected in your wallet.";
+  }
+  if (message.includes("batch not found in supabase")) {
+    return "No matching batch exists in AgriTrust. Check the batch ID and try again.";
+  }
+  if (message.includes("batch not found")) {
+    return "This batch does not exist in the deployed Amoy ProduceRegistry. Load the registered on-chain batch before submitting.";
+  }
+  if (message.includes("not awaiting inspection")) {
+    return "This batch is not awaiting inspection and cannot be inspected again.";
+  }
+  if (message.includes("not an inspector")) {
+    return "The connected wallet is not approved as an Inspector on the deployed ComplianceRegistry.";
+  }
+  if (message.includes("caller is not an authorized contract")) {
+    return "The deployed ComplianceRegistry is not authorized by the ProduceRegistry. Ask the contract owner to verify the deployment wiring.";
+  }
+  if (message.includes("gas limit too high") || message.includes("exceeds allowance")) {
+    return "The wallet could not estimate this transaction because contract validation failed. Reload the batch and verify the connected Inspector wallet.";
+  }
+  if (
+    message.includes("failed to fetch") ||
+    message.includes("network error") ||
+    message.includes("network request failed")
+  ) {
+    return action === "inspection"
+      ? "Polygon Amoy could not be reached. No inspection transaction was submitted."
+      : "Polygon Amoy could not be reached while preparing the certificate. No certificate transaction was submitted; retry certificate issuance.";
+  }
+
+  return action === "inspection"
+    ? "Inspection validation failed. Verify the batch, Inspector wallet, and Amoy network, then try again."
+    : "The certificate transaction could not be prepared. The inspection remains recorded; retry certificate issuance.";
+}
 
 function PageHeading() {
   return (
@@ -115,10 +333,14 @@ function SearchRow({
   buttonColor,
   value,
   onChange,
+  onLoad,
+  isLoading = false,
 }: {
   buttonColor: string;
   value: string;
   onChange: (val: string) => void;
+  onLoad?: () => void;
+  isLoading?: boolean;
 }) {
   return (
     <div className="mb-6 flex gap-3 px-8">
@@ -138,10 +360,12 @@ function SearchRow({
         <QrCode className="h-4 w-4" />
       </button>
       <button
-        className={`rounded-lg px-4 py-2.5 text-sm font-medium text-white ${buttonColor}`}
+        className={`rounded-lg px-4 py-2.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 ${buttonColor}`}
         type="button"
+        onClick={onLoad}
+        disabled={Boolean(onLoad) && (!value.trim() || isLoading)}
       >
-        Load Batch
+        {isLoading ? "Loading..." : "Load Batch"}
       </button>
     </div>
   );
@@ -152,7 +376,7 @@ function LoadedBatchCard({
   status,
 }: {
   batchId: string;
-  status: "AWAITING INSPECTION" | "CERTIFIED";
+  status: "AWAITING INSPECTION" | "INSPECTED ON-CHAIN" | "CERTIFIED";
 }) {
   return (
     <div className="mx-8 mb-6 flex items-center gap-4 rounded-xl border border-agri-border bg-agri-raised p-4">
@@ -663,6 +887,16 @@ function NewBatchTab() {
                         <ExternalLink className="h-3 w-3" />
                       </a>
                     </div>
+                    <div className="mt-4 border-t border-accent-green/20 pt-4">
+                      <p className="mb-3 text-xs font-semibold text-agri-text">
+                        Public verification QR
+                      </p>
+                      <VerificationQr
+                        batchId={batchId}
+                        showOpenAction
+                        size={160}
+                      />
+                    </div>
                   </div>
                 ) : null}
 
@@ -750,11 +984,21 @@ function NewBatchTab() {
 }
 
 function VerifyBatchTab() {
-  const { isConnected } = useAccount();
+  const { address, chainId, isConnected } = useAccount();
+  const publicClient = usePublicClient();
+  const {
+    data: walletClient,
+    error: walletClientError,
+  } = useWalletClient({ config: wagmiConfig, chainId: POLYGON_AMOY_CHAIN_ID });
   const { openConnectModal } = useConnectModal();
   const { writeContractAsync } = useWriteContract();
 
-  const [searchBatchId, setSearchBatchId] = useState<string>("AGT-0042");
+  const [searchBatchId, setSearchBatchId] = useState<string>("");
+  const [loadedBatchId, setLoadedBatchId] = useState<string | null>(null);
+  const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
+  const [flowMode, setFlowMode] = useState<InspectionFlowMode>("record");
+  const [recoveryNotice, setRecoveryNotice] = useState<string>("");
+  const [isLoadingBatch, setIsLoadingBatch] = useState(false);
   const [weightKg, setWeightKg] = useState<string>("498.5");
   const [qualityGrade, setQualityGrade] = useState<string>("Grade A - Premium");
   const [storageCondition, setStorageCondition] = useState<string>("Optimal");
@@ -763,14 +1007,18 @@ function VerifyBatchTab() {
   const [meetsNAFDAC, setMeetsNAFDAC] = useState<boolean>(true);
   const [notes, setNotes] = useState<string>("");
   const [inspectorId, setInspectorId] = useState<string>("NAFDAC-0042");
-  const [userId, setUserId] = useState<string | null>(null);
+  const [authorizedWallet, setAuthorizedWallet] = useState<string | null>(null);
 
   const [statusStage, setStatusStage] = useState<
     | "idle"
+    | "validating_insp"
+    | "validating_cert"
     | "wallet_pending_insp"
     | "confirming_insp"
     | "wallet_pending_cert"
     | "confirming_cert"
+    | "sync_pending"
+    | "sync_failed"
     | "success"
     | "error"
   >("idle");
@@ -778,163 +1026,628 @@ function VerifyBatchTab() {
   const [inspTxHash, setInspTxHash] = useState<`0x${string}` | undefined>();
   const [certTxHash, setCertTxHash] = useState<`0x${string}` | undefined>();
 
-  // Track confirmation for inspection transaction
-  const { isSuccess: isInspConfirmed } = useWaitForTransactionReceipt({ hash: inspTxHash });
-  // Track confirmation for certificate transaction
-  const { isSuccess: isCertConfirmed } = useWaitForTransactionReceipt({ hash: certTxHash });
+  const {
+    data: inspReceipt,
+    error: inspReceiptError,
+    isError: isInspReceiptError,
+  } = useWaitForTransactionReceipt({ hash: inspTxHash });
+  const {
+    data: certReceipt,
+    error: certReceiptError,
+    isError: isCertReceiptError,
+  } = useWaitForTransactionReceipt({ hash: certTxHash });
+  const isInspConfirmed = inspReceipt?.status === "success";
+  const isCertConfirmed = certReceipt?.status === "success";
 
   useEffect(() => {
     async function loadUser() {
       const { data: userData, error: userError } =
         await supabase.auth.getUser();
       if (!userError && userData.user) {
-        setUserId(userData.user.id);
+
+        const { data: profile } = await supabase
+          .from("users")
+          .select("wallet_address")
+          .eq("id", userData.user.id)
+          .single();
+
+        setAuthorizedWallet(profile?.wallet_address ?? null);
       }
     }
     loadUser();
   }, []);
 
+  useEffect(() => {
+    if (!isInspReceiptError || statusStage !== "confirming_insp") return;
+
+    const timeout = window.setTimeout(() => {
+      setErrorMessage(inspectionErrorMessage(inspReceiptError, "inspection"));
+      setStatusStage("error");
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [inspReceiptError, isInspReceiptError, statusStage]);
+
+  useEffect(() => {
+    if (!isCertReceiptError || statusStage !== "confirming_cert") return;
+
+    const timeout = window.setTimeout(() => {
+      setErrorMessage(inspectionErrorMessage(certReceiptError, "certificate"));
+      setStatusStage("error");
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [certReceiptError, isCertReceiptError, statusStage]);
+
+  useEffect(() => {
+    if (inspReceipt?.status !== "reverted" || statusStage !== "confirming_insp") return;
+    const timeout = window.setTimeout(() => {
+      setErrorMessage("The inspection transaction reverted on-chain. No certificate transaction was attempted.");
+      setStatusStage("error");
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [inspReceipt?.status, statusStage]);
+
+  useEffect(() => {
+    if (certReceipt?.status !== "reverted" || statusStage !== "confirming_cert") return;
+    const timeout = window.setTimeout(() => {
+      setErrorMessage("The certificate transaction reverted on-chain. The inspection remains recorded and certificate issuance can be retried.");
+      setStatusStage("error");
+      setFlowMode("certificate_recovery");
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [certReceipt?.status, statusStage]);
+
+  async function handleLoadInspectionBatch() {
+    const batchId = searchBatchId.trim();
+    if (!batchId || !publicClient) return;
+
+    setIsLoadingBatch(true);
+    setLoadedBatchId(null);
+    setActiveBatchId(null);
+    setFlowMode("record");
+    setRecoveryNotice("");
+    setErrorMessage("");
+
+    try {
+      const { data: batch, error } = await supabase
+        .from("batches")
+        .select("batch_id, status")
+        .eq("batch_id", batchId)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!batch) throw new Error("Batch not found in Supabase");
+      const onChainBatch = await publicClient.readContract({
+        ...produceRegistryContract,
+        functionName: "getBatch",
+        args: [batchId],
+      });
+
+      if (onChainBatch.status === 0) {
+        if (batch.status !== "REGISTERED") {
+          throw new Error("Batch is currently " + batch.status + ", not awaiting inspection.");
+        }
+        setFlowMode("record");
+        setRecoveryNotice("");
+      } else if (onChainBatch.status === 1) {
+        const existingInspection = await publicClient.readContract({
+          ...complianceRegistryContract,
+          functionName: "getInspection",
+          args: [batchId],
+        });
+        setWeightKg(existingInspection.physicalWeightKg.toString());
+        setQualityGrade(existingInspection.qualityGrade);
+        setGmoResult(existingInspection.gmoStatus === 2 ? "GMO_PRESENT" : "NON_GMO");
+        setBiosafetyGrade(existingInspection.biosafetyGrade);
+        setMeetsNAFDAC(existingInspection.meetsNAFDACStandards);
+        setNotes(existingInspection.notes);
+        setInspectorId(existingInspection.inspectorId);
+        try {
+          await publicClient.readContract({
+            ...complianceRegistryContract,
+            functionName: "getCertificate",
+            args: [batchId],
+          });
+          setLoadedBatchId(batchId);
+          try {
+            const syncState = await requestInspectionSynchronization(batchId, "GET");
+            setInspTxHash(syncState.blockchain.inspectionTransactionHash);
+            setCertTxHash(syncState.blockchain.certificateTransactionHash);
+            if (syncState.synchronized) {
+              setFlowMode("complete");
+              setStatusStage("success");
+              setRecoveryNotice("");
+            } else {
+              setFlowMode("sync_recovery");
+              setStatusStage("sync_failed");
+              setRecoveryNotice(
+                "Certificate issued on-chain, but database synchronization is pending.",
+              );
+              setErrorMessage(syncState.mismatches.join(" "));
+            }
+          } catch (syncError) {
+            setFlowMode("sync_recovery");
+            setStatusStage("sync_failed");
+            setRecoveryNotice(
+              "Certificate issued on-chain, but database synchronization is pending.",
+            );
+            setErrorMessage(errorText(syncError) || "Synchronization state could not be verified.");
+          }
+          return;
+        } catch (certificateError) {
+          if (!errorText(certificateError).toLowerCase().includes("certificate not found")) {
+            throw certificateError;
+          }
+          setFlowMode("certificate_recovery");
+          setRecoveryNotice(
+            "The inspection is confirmed on-chain, but its certificate is missing. Continue with certificate issuance only.",
+          );
+        }      } else {
+        throw new Error("This batch has moved beyond inspection and cannot be inspected again.");
+      }
+
+      setLoadedBatchId(batchId);
+      setStatusStage("idle");
+    } catch (error) {
+      setErrorMessage(inspectionErrorMessage(error, "inspection"));
+      setStatusStage("error");
+    } finally {
+      setIsLoadingBatch(false);
+    }
+  }
+
   // Step 2: Trigger issueCertificate automatically after recordInspection is confirmed on-chain
   useEffect(() => {
-    if (isInspConfirmed && inspTxHash && statusStage === "confirming_insp") {
+    if (isInspConfirmed && inspTxHash && activeBatchId && statusStage === "confirming_insp") {
       async function triggerIssueCertificate() {
+        if (!publicClient || !address || !activeBatchId) return;
+
+        if (!walletClient) {
+          const details = safeContractError(
+            walletClientError ?? new Error("Wallet client is unavailable"),
+          );
+          console.warn("[AgriTrust Inspector] Wallet client acquisition failed", {
+            stage: "wallet_client",
+            batchId: activeBatchId,
+            ...details,
+          });
+          setFlowMode("certificate_recovery");
+          setStatusStage("error");
+          setErrorMessage(certificateSubmissionErrorMessage(walletClientError ?? details));
+          return;
+        }
+        if (
+          walletClient.account.address.toLowerCase() !== address.toLowerCase() ||
+          walletClient.chain.id !== POLYGON_AMOY_CHAIN_ID
+        ) {
+          setFlowMode("certificate_recovery");
+          setStatusStage("error");
+          setErrorMessage(
+            "The active wallet client does not match the approved Inspector account on Polygon Amoy. Reconnect the wallet and retry certificate issuance.",
+          );
+          return;
+        }
+
+        const certIdVal =
+          "CERT-" + activeBatchId + "-" + Math.floor(1000 + Math.random() * 9000);
+        const validFromVal = BigInt(Math.floor(Date.now() / 1000));
+        const validUntilVal = validFromVal + BigInt(31536000);
+        const certificateArgs = [
+          activeBatchId,
+          certIdVal,
+          validFromVal,
+          validUntilVal,
+        ] as const;
+
+        let estimatedGas: bigint;
+        setStatusStage("validating_cert");
+        try {
+          const [, gas] = await Promise.all([
+            publicClient.simulateContract({
+              account: address,
+              ...complianceRegistryContract,
+              functionName: "issueCertificate",
+              args: certificateArgs,
+            }),
+            publicClient.estimateContractGas({
+              account: address,
+              ...complianceRegistryContract,
+              functionName: "issueCertificate",
+              args: certificateArgs,
+            }),
+          ]);
+          estimatedGas = gas;
+        } catch (error: unknown) {
+          console.warn("[AgriTrust Inspector] Certificate validation failed", {
+            stage: "simulation",
+            batchId: activeBatchId,
+            ...safeContractError(error),
+          });
+          setFlowMode("certificate_recovery");
+          setStatusStage("error");
+          setErrorMessage(
+            "Certificate simulation or gas estimation failed. " +
+              inspectionErrorMessage(error, "certificate"),
+          );
+          return;
+        }
+
         setStatusStage("wallet_pending_cert");
         try {
-          const certIdVal = `CERT-${searchBatchId}-${Math.floor(1000 + Math.random() * 9000)}`;
-          const validFromVal = BigInt(Math.floor(Date.now() / 1000));
-          const validUntilVal = validFromVal + BigInt(31536000); // 1 year validity (365 days)
-
-          const hash = await writeContractAsync({
-            address: complianceRegistryContract.address,
-            abi: complianceRegistryContract.abi,
+          const hash = await walletClient.writeContract({
+            ...complianceRegistryContract,
             functionName: "issueCertificate",
-            args: [searchBatchId, certIdVal, validFromVal, validUntilVal],
+            args: certificateArgs,
+            account: walletClient.account,
+            chain: walletClient.chain,
+            gas: estimatedGas,
           });
-
           setCertTxHash(hash);
           setStatusStage("confirming_cert");
-        } catch (err: unknown) {
-          console.error("Certificate issuance error:", err);
-          const message = err instanceof Error ? err.message : String(err);
+        } catch (error: unknown) {
+          console.warn("[AgriTrust Inspector] Certificate wallet submission failed", {
+            stage: "wallet_submission",
+            batchId: activeBatchId,
+            ...safeContractError(error),
+          });
+          setFlowMode("certificate_recovery");
           setStatusStage("error");
-          if (message.includes("User rejected") || message.includes("user rejected")) {
-            setErrorMessage("Inspection was recorded, but certificate issuance was rejected in your wallet.");
-          } else {
-            setErrorMessage(`Inspection was recorded, but certificate issuance failed: ${message}`);
-          }
+          setErrorMessage(certificateSubmissionErrorMessage(error));
         }
       }
       triggerIssueCertificate();
     }
-  }, [isInspConfirmed, inspTxHash, statusStage, searchBatchId, writeContractAsync]);
+  }, [
+    activeBatchId,
+    address,
+    inspTxHash,
+    isInspConfirmed,
+    publicClient,
+    statusStage,
+    walletClient,
+    walletClientError,
+  ]);
 
-  // Step 3: Insert into Supabase only after BOTH recordInspection AND issueCertificate are confirmed
+  // Step 3: A successful receipt starts a separate, authenticated database synchronization stage.
   useEffect(() => {
-    if (isCertConfirmed && certTxHash && statusStage === "confirming_cert") {
-      async function recordInspectionSuccess() {
-        try {
-          const combinedTxHash = certTxHash || inspTxHash;
-
-          const { error: inspError } = await supabase
-            .from("inspections")
-            .insert({
-              batch_id: searchBatchId,
-              inspector_id: userId,
-              weight_kg: parseFloat(weightKg || "0"),
-              quality_grade: qualityGrade,
-              gmo_test_result: gmoResult,
-              certificate_issued: true,
-              tx_hash: combinedTxHash,
-              inspected_at: new Date().toISOString(),
-            });
-
-          if (inspError) {
-            console.error("Inspections table insert error:", inspError);
-          }
-
-          const { error: batchError } = await supabase
-            .from("batches")
-            .update({
-              gmo_status: "inspector_verified",
-              status: "INSPECTED",
-            })
-            .eq("batch_id", searchBatchId);
-
-          if (batchError) {
-            console.error("Batches table update error:", batchError);
-          }
-
-          setStatusStage("success");
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err);
-          setErrorMessage(`Database update failed: ${message}`);
-          setStatusStage("error");
-        }
-      }
-      recordInspectionSuccess();
+    if (
+      !isCertConfirmed ||
+      !certTxHash ||
+      !activeBatchId ||
+      statusStage !== "confirming_cert"
+    ) {
+      return;
     }
-  }, [isCertConfirmed, certTxHash, inspTxHash, statusStage, searchBatchId, userId, weightKg, qualityGrade, gmoResult]);
 
+    async function synchronizeConfirmedCertificate() {
+      setStatusStage("sync_pending");
+      setRecoveryNotice("Certificate issued on-chain, but database synchronization is pending.");
+      setErrorMessage("");
+      try {
+        if (!activeBatchId) throw new Error("The confirmed batch ID is unavailable.");
+        const syncState = await requestInspectionSynchronization(activeBatchId, "POST");
+        setInspTxHash(syncState.blockchain.inspectionTransactionHash);
+        setCertTxHash(syncState.blockchain.certificateTransactionHash);
+        setFlowMode("complete");
+        setRecoveryNotice("");
+        setStatusStage("success");
+      } catch (error: unknown) {
+        console.warn("[AgriTrust Inspector] Database synchronization failed", {
+          stage: "database_sync",
+          batchId: activeBatchId,
+          ...safeContractError(error),
+        });
+        setFlowMode("sync_recovery");
+        setRecoveryNotice("Certificate issued on-chain, but database synchronization is pending.");
+        setErrorMessage(errorText(error) || "Database synchronization failed.");
+        setStatusStage("sync_failed");
+      }
+    }
+
+    synchronizeConfirmedCertificate();
+  }, [activeBatchId, certTxHash, isCertConfirmed, statusStage]);
   async function handleSubmitInspection() {
-    if (!isConnected) {
+    if (!isConnected || !address) {
       openConnectModal?.();
       return;
     }
 
+    const batchId = searchBatchId.trim();
+    const weightNumber = Number(weightKg);
+
+    if (flowMode !== "record") {
+      setErrorMessage("This batch already has an on-chain inspection. Use certificate recovery instead.");
+      setStatusStage("error");
+      return;
+    }
+
+    if (chainId !== POLYGON_AMOY_CHAIN_ID) {
+      setErrorMessage("Switch your wallet to Polygon Amoy before submitting.");
+      setStatusStage("error");
+      return;
+    }
+    if (!authorizedWallet) {
+      setErrorMessage("Your approved Inspector wallet could not be resolved. Refresh the page and try again.");
+      setStatusStage("error");
+      return;
+    }
+    if (address.toLowerCase() !== authorizedWallet.toLowerCase()) {
+      setErrorMessage(
+        `Connect the approved Inspector wallet ${authorizedWallet.slice(0, 6)}...${authorizedWallet.slice(-4)} before submitting.`,
+      );
+      setStatusStage("error");
+      return;
+    }
+    if (!batchId || loadedBatchId !== batchId) {
+      setErrorMessage("Load and validate the registered batch before submitting an inspection.");
+      setStatusStage("error");
+      return;
+    }
+    if (!inspectorId.trim() || !qualityGrade.trim() || !biosafetyGrade.trim()) {
+      setErrorMessage("Complete the Inspector ID, quality grade, and biosafety grade fields.");
+      setStatusStage("error");
+      return;
+    }
+    if (!Number.isFinite(weightNumber) || weightNumber <= 0) {
+      setErrorMessage("Enter a valid positive inspection weight.");
+      setStatusStage("error");
+      return;
+    }
+    if (!publicClient) {
+      setErrorMessage("Polygon Amoy is temporarily unavailable. Try again shortly.");
+      setStatusStage("error");
+      return;
+    }
+
     setErrorMessage("");
-    setStatusStage("wallet_pending_insp");
+    setStatusStage("validating_insp");
 
     try {
-      const gmoStatusVal = gmoResult === "NON_GMO" ? 1 : 2;
-      const weightVal = BigInt(Math.round(parseFloat(weightKg || "0")));
-
-      const hash = await writeContractAsync({
-        address: complianceRegistryContract.address,
-        abi: complianceRegistryContract.abi,
-        functionName: "recordInspection",
-        args: [
-          searchBatchId,
-          inspectorId,
-          weightVal,
-          qualityGrade,
-          gmoStatusVal,
-          biosafetyGrade,
-          meetsNAFDAC,
-          notes,
-        ],
+      const approvedOnChain = await publicClient.readContract({
+        ...complianceRegistryContract,
+        functionName: "isApprovedInspector",
+        args: [address],
       });
 
+      if (!approvedOnChain) {
+        throw new Error("Not an inspector");
+      }
+
+      const gmoStatusVal = gmoResult === "NON_GMO" ? 1 : 2;
+      const weightVal = BigInt(Math.round(weightNumber));
+      const args = [
+        batchId,
+        inspectorId.trim(),
+        weightVal,
+        qualityGrade.trim(),
+        gmoStatusVal,
+        biosafetyGrade.trim(),
+        meetsNAFDAC,
+        notes.trim(),
+      ] as const;
+
+      const { request } = await publicClient.simulateContract({
+        account: address,
+        ...complianceRegistryContract,
+        functionName: "recordInspection",
+        args,
+      });
+
+      setActiveBatchId(batchId);
+      setStatusStage("wallet_pending_insp");
+      const hash = await writeContractAsync(request);
       setInspTxHash(hash);
       setStatusStage("confirming_insp");
-    } catch (err: unknown) {
-      console.error("Inspection error:", err);
-      const message = err instanceof Error ? err.message : String(err);
+    } catch (error: unknown) {
+      console.warn("Inspection transaction failed", {
+        message: errorText(error).split(" | ")[0],
+      });
+      setErrorMessage(inspectionErrorMessage(error, "inspection"));
       setStatusStage("error");
-
-      if (
-        message.includes("Not an inspector") ||
-        message.includes("onlyInspector") ||
-        message.includes("not approved")
-      ) {
-        setErrorMessage(
-          "Your wallet is not yet approved as an Inspector. Contact your Regulator."
-        );
-      } else if (
-        message.includes("User rejected") ||
-        message.includes("user rejected")
-      ) {
-        setErrorMessage("Transaction was rejected in your wallet.");
-      } else {
-        setErrorMessage(`Inspection submission failed: ${message}`);
-      }
     }
   }
 
+  async function handleResumeCertificate() {
+    if (!isConnected || !address) {
+      openConnectModal?.();
+      return;
+    }
+
+    const batchId = loadedBatchId;
+    if (!batchId || flowMode !== "certificate_recovery") {
+      setErrorMessage("Load a batch with a confirmed inspection and missing certificate first.");
+      setStatusStage("error");
+      return;
+    }
+    if (chainId !== POLYGON_AMOY_CHAIN_ID) {
+      setErrorMessage("Switch your wallet to Polygon Amoy before issuing the certificate.");
+      setStatusStage("error");
+      return;
+    }
+    if (!authorizedWallet || address.toLowerCase() !== authorizedWallet.toLowerCase()) {
+      setErrorMessage("Connect the approved Inspector wallet before issuing the certificate.");
+      setStatusStage("error");
+      return;
+    }
+    if (!publicClient) {
+      setErrorMessage("Polygon Amoy is temporarily unavailable. No certificate transaction was submitted.");
+      setStatusStage("error");
+      return;
+    }
+    if (!walletClient) {
+      const details = safeContractError(
+        walletClientError ?? new Error("Wallet client is unavailable"),
+      );
+      console.warn("[AgriTrust Inspector] Wallet client acquisition failed", {
+        stage: "wallet_client",
+        batchId,
+        ...details,
+      });
+      setErrorMessage(certificateSubmissionErrorMessage(walletClientError ?? details));
+      setStatusStage("error");
+      return;
+    }
+    if (
+      walletClient.account.address.toLowerCase() !== address.toLowerCase() ||
+      walletClient.chain.id !== POLYGON_AMOY_CHAIN_ID
+    ) {
+      setErrorMessage(
+        "The active wallet client does not match the approved Inspector account on Polygon Amoy. Reconnect the wallet and retry certificate issuance.",
+      );
+      setStatusStage("error");
+      return;
+    }
+
+    setErrorMessage("");
+    setStatusStage("validating_cert");
+    setActiveBatchId(batchId);
+
+    try {
+      const [approvedOnChain] = await Promise.all([
+        publicClient.readContract({
+          ...complianceRegistryContract,
+          functionName: "isApprovedInspector",
+          args: [address],
+        }),
+        publicClient.readContract({
+          ...complianceRegistryContract,
+          functionName: "getInspection",
+          args: [batchId],
+        }),
+      ]);
+
+      if (!approvedOnChain) throw new Error("Not an inspector");
+
+      try {
+        await publicClient.readContract({
+          ...complianceRegistryContract,
+          functionName: "getCertificate",
+          args: [batchId],
+        });
+        setFlowMode("complete");
+        setRecoveryNotice(
+          "This batch already has an on-chain certificate. No transaction was repeated.",
+        );
+        setStatusStage("idle");
+        return;
+      } catch (certificateError) {
+        if (!errorText(certificateError).toLowerCase().includes("certificate not found")) {
+          throw certificateError;
+        }
+      }
+
+      const validFromVal = BigInt(Math.floor(Date.now() / 1000));
+      const validUntilVal = validFromVal + BigInt(31536000);
+      const certIdVal =
+        "CERT-" + batchId + "-" + Math.floor(1000 + Math.random() * 9000);
+      const certificateArgs = [
+        batchId,
+        certIdVal,
+        validFromVal,
+        validUntilVal,
+      ] as const;
+      const [, estimatedGas] = await Promise.all([
+        publicClient.simulateContract({
+          account: address,
+          ...complianceRegistryContract,
+          functionName: "issueCertificate",
+          args: certificateArgs,
+        }),
+        publicClient.estimateContractGas({
+          account: address,
+          ...complianceRegistryContract,
+          functionName: "issueCertificate",
+          args: certificateArgs,
+        }),
+      ]);
+
+      setStatusStage("wallet_pending_cert");
+      try {
+        const hash = await walletClient.writeContract({
+          ...complianceRegistryContract,
+          functionName: "issueCertificate",
+          args: certificateArgs,
+          account: walletClient.account,
+          chain: walletClient.chain,
+          gas: estimatedGas,
+        });
+        setCertTxHash(hash);
+        setStatusStage("confirming_cert");
+      } catch (error: unknown) {
+        console.warn("[AgriTrust Inspector] Certificate recovery submission failed", {
+          stage: "wallet_submission",
+          batchId,
+          ...safeContractError(error),
+        });
+        setErrorMessage(certificateSubmissionErrorMessage(error));
+        setStatusStage("error");
+      }
+    } catch (error: unknown) {
+      console.warn("[AgriTrust Inspector] Certificate recovery validation failed", {
+        stage: "simulation",
+        batchId,
+        ...safeContractError(error),
+      });
+      setErrorMessage(
+        "Certificate simulation or gas estimation failed. " +
+          inspectionErrorMessage(error, "certificate"),
+      );
+      setStatusStage("error");
+    }
+  }
+
+  async function handleRetrySynchronization() {
+    const batchId = loadedBatchId ?? activeBatchId;
+    if (!batchId || flowMode !== "sync_recovery") {
+      setErrorMessage("Load a batch with confirmed on-chain records and pending database synchronization first.");
+      setStatusStage("sync_failed");
+      return;
+    }
+    if (!isConnected || !address) {
+      openConnectModal?.();
+      return;
+    }
+    if (chainId !== POLYGON_AMOY_CHAIN_ID) {
+      setErrorMessage("Switch your wallet to Polygon Amoy before retrying synchronization.");
+      setStatusStage("sync_failed");
+      return;
+    }
+    if (!authorizedWallet || address.toLowerCase() !== authorizedWallet.toLowerCase()) {
+      setErrorMessage("Connect the approved Inspector wallet before retrying synchronization.");
+      setStatusStage("sync_failed");
+      return;
+    }
+
+    setActiveBatchId(batchId);
+    setStatusStage("sync_pending");
+    setRecoveryNotice("Certificate issued on-chain, but database synchronization is pending.");
+    setErrorMessage("");
+    try {
+      const syncState = await requestInspectionSynchronization(batchId, "POST");
+      setInspTxHash(syncState.blockchain.inspectionTransactionHash);
+      setCertTxHash(syncState.blockchain.certificateTransactionHash);
+      setFlowMode("complete");
+      setRecoveryNotice("");
+      setStatusStage("success");
+    } catch (error: unknown) {
+      console.warn("[AgriTrust Inspector] Synchronization retry failed", {
+        stage: "database_sync_retry",
+        batchId,
+        ...safeContractError(error),
+      });
+      setErrorMessage(errorText(error) || "Database synchronization failed.");
+      setStatusStage("sync_failed");
+    }
+  }
   const isProcessing =
+    statusStage === "validating_insp" ||
+    statusStage === "validating_cert" ||
     statusStage === "wallet_pending_insp" ||
     statusStage === "confirming_insp" ||
     statusStage === "wallet_pending_cert" ||
-    statusStage === "confirming_cert";
+    statusStage === "confirming_cert" ||
+    statusStage === "sync_pending";
 
   return (
     <>
@@ -948,9 +1661,28 @@ function VerifyBatchTab() {
       <SearchRow
         buttonColor="bg-accent-blue"
         value={searchBatchId}
-        onChange={setSearchBatchId}
+        onChange={(value) => {
+          setSearchBatchId(value);
+          setLoadedBatchId(null);
+          setActiveBatchId(null);
+          setFlowMode("record");
+          setRecoveryNotice("");
+              }}
+        onLoad={handleLoadInspectionBatch}
+        isLoading={isLoadingBatch}
       />
-      <LoadedBatchCard batchId={searchBatchId} status="AWAITING INSPECTION" />
+      {loadedBatchId ? (
+        <LoadedBatchCard
+          batchId={loadedBatchId}
+          status={
+            flowMode === "record"
+              ? "AWAITING INSPECTION"
+              : flowMode === "certificate_recovery"
+                ? "INSPECTED ON-CHAIN"
+                : "CERTIFIED"
+          }
+        />
+      ) : null}
 
       <section className="grid grid-cols-1 gap-6 px-8 xl:grid-cols-[1fr_340px]">
         <div className="flex flex-col gap-4 rounded-xl glass p-6">
@@ -1078,6 +1810,11 @@ function VerifyBatchTab() {
             />
           </label>
 
+          {recoveryNotice ? (
+            <div className="rounded-lg border border-accent-amber/30 bg-accent-amber/10 p-4 text-sm text-accent-amber">
+              {recoveryNotice}
+            </div>
+          ) : null}
           {statusStage === "success" && (certTxHash || inspTxHash) ? (
             <div className="rounded-lg border border-accent-green/30 bg-accent-green/10 p-4 text-sm text-accent-green space-y-2">
               <div className="flex items-center gap-2 font-bold">
@@ -1117,7 +1854,7 @@ function VerifyBatchTab() {
             </div>
           ) : null}
 
-          {statusStage === "error" && errorMessage ? (
+          {(statusStage === "error" || statusStage === "sync_failed") && errorMessage ? (
             <div className="rounded-lg border border-accent-red/30 bg-accent-red/10 p-3 text-sm text-accent-red flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 shrink-0" />
               <span>{errorMessage}</span>
@@ -1137,10 +1874,26 @@ function VerifyBatchTab() {
             <button
               className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-accent-blue py-3 font-semibold text-white transition-shadow duration-300 hover:shadow-[0_0_15px_rgba(59,130,246,0.4)] disabled:opacity-50"
               type="button"
-              onClick={handleSubmitInspection}
-              disabled={isProcessing || statusStage === "success"}
+              onClick={
+                flowMode === "certificate_recovery"
+                  ? handleResumeCertificate
+                  : flowMode === "sync_recovery"
+                    ? handleRetrySynchronization
+                    : handleSubmitInspection
+              }
+              disabled={isProcessing || statusStage === "success" || flowMode === "complete"}
             >
-              {statusStage === "wallet_pending_insp" ? (
+              {statusStage === "validating_insp" ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Validating inspection on Amoy...
+                </>
+              ) : statusStage === "validating_cert" ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Validating certificate on Amoy...
+                </>
+              ) : statusStage === "wallet_pending_insp" ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Confirm inspection in wallet... (1/2)
@@ -1160,10 +1913,21 @@ function VerifyBatchTab() {
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Confirming certificate on-chain... (2/2)
                 </>
+              ) : statusStage === "sync_pending" ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Synchronizing confirmed records...
+                </>
               ) : (
                 <>
                   <LinkIcon className="h-4 w-4" />
-                  Submit Inspection & Issue Certificate
+                  {flowMode === "certificate_recovery"
+                    ? "Continue Certificate Issuance"
+                    : flowMode === "sync_recovery"
+                      ? "Retry Synchronization"
+                      : flowMode === "complete"
+                        ? "Verification & Database Sync Complete"
+                        : "Submit Inspection & Issue Certificate"}
                 </>
               )}
             </button>
@@ -1172,7 +1936,13 @@ function VerifyBatchTab() {
           <div className="mt-3 flex items-center gap-2">
             <AlertTriangle className="h-3.5 w-3.5 text-accent-amber" />
             <p className="text-xs text-agri-muted">
-              This action requires 2 wallet confirmations (Inspection + Certificate).
+              {flowMode === "certificate_recovery"
+                ? "Recovery requires only the certificate wallet confirmation."
+                : flowMode === "sync_recovery"
+                  ? "Retry reads confirmed chain state and updates Supabase only; it sends no blockchain transaction."
+                  : flowMode === "complete"
+                    ? "The on-chain verification and database synchronization are complete."
+                    : "This action requires 2 wallet confirmations (Inspection + Certificate)."}
             </p>
           </div>
         </div>

@@ -1,11 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAccount, useDisconnect } from "wagmi";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
-import Image from "next/image";
 import {
   AlertTriangle,
   Camera,
@@ -28,9 +26,9 @@ import {
   Unlink,
 } from "lucide-react";
 
+import VerificationQr from "@/components/verification/VerificationQr";
 import { api } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
-import { buildVerificationUrl } from "@/lib/verify-links";
 import type { UserRole } from "@/types";
 
 type SectionKey = "profile" | "verification" | "wallet" | "qr" | "danger";
@@ -282,14 +280,6 @@ export default function SettingsPage() {
 
   const copyWalletAddress = (addr: string) => {
     void navigator.clipboard.writeText(addr).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-
-  const copyVerificationLink = (batchId: string) => {
-    const link = buildVerificationUrl(window.location.origin, batchId);
-    void navigator.clipboard.writeText(link).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
@@ -936,44 +926,26 @@ export default function SettingsPage() {
                   </div>
                 ) : (
                   <div className="divide-y divide-agri-border">
-                    {qrBatches.map((batch) => {
-                      const verificationUrl = buildVerificationUrl(window.location.origin, batch.batchId);
-                      const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(verificationUrl)}&size=160x160`;
-
-                      return (
-                        <div key={batch.batchId} className="flex items-center justify-between gap-4 p-4">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <Image
-                              src={qrCodeUrl}
-                              alt={`QR code for ${batch.batchId}`}
-                              className="h-16 w-16 rounded-lg border border-agri-border bg-white p-1"
-                            />
-                            <div className="min-w-0">
-                              <p className="font-mono text-sm font-semibold text-accent-cyan">{batch.batchId}</p>
-                              <p className="mt-1 text-xs text-agri-muted">{batch.cropType} · {batch.status}</p>
-                            </div>
-                          </div>
-                          <div className="flex shrink-0 items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => copyVerificationLink(batch.batchId)}
-                              className="flex items-center gap-1.5 rounded-lg border border-agri-border bg-agri-raised px-3 py-2 text-xs text-agri-text hover:bg-agri-overlay"
-                            >
-                              {copied ? <Check className="h-3.5 w-3.5 text-accent-green" /> : <Copy className="h-3.5 w-3.5" />}
-                              {copied ? "Copied" : "Copy link"}
-                            </button>
-                            <Link
-                              href={verificationUrl}
-                              target="_blank"
-                              className="flex items-center gap-1.5 rounded-lg bg-accent-blue px-3 py-2 text-xs font-medium text-white hover:bg-accent-blue/90"
-                            >
-                              <ExternalLink className="h-3.5 w-3.5" />
-                              Open
-                            </Link>
-                          </div>
+                    {qrBatches.map((batch) => (
+                      <div
+                        key={batch.batchId}
+                        className="flex flex-col justify-between gap-4 p-4 sm:flex-row sm:items-center"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-mono text-sm font-semibold text-accent-cyan">
+                            {batch.batchId}
+                          </p>
+                          <p className="mt-1 text-xs text-agri-muted">
+                            {batch.cropType} · {batch.status}
+                          </p>
                         </div>
-                      );
-                    })}
+                        <VerificationQr
+                          batchId={batch.batchId}
+                          compact
+                          showOpenAction
+                        />
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

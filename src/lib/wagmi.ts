@@ -6,6 +6,6 @@ export const wagmiConfig = createConfig({
   chains: [polygonAmoy],
   connectors: [injected()],
   transports: {
-    [polygonAmoy.id]: http(),
+    [polygonAmoy.id]: http(process.env.NEXT_PUBLIC_AMOY_RPC_URL),
   },
 });

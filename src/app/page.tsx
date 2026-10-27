@@ -89,13 +89,18 @@ const stats = [
 
 
 // Keep the existing destinations throughout this visual-only redesign.
-const navigationItems = ["How it works", "For Farmers", "For Regulators", "Verify Produce"];
+const navigationItems = [
+  { label: "How it works", href: "#how-it-works" },
+  { label: "For Farmers", href: "#for-farmers" },
+  { label: "For Regulators", href: "#for-regulators" },
+  { label: "Verify Produce", href: "/verify/AGT-0042" },
+] as const;
 export default function Home() {
   return (
     <main className="landing">
       <nav className="landing-nav landing-container" aria-label="Main navigation">
         <BrandLogo size="sm" textClassName="text-xl" />
-        <div className="landing-nav-links">{navigationItems.map(item => <a key={item} href="#how-it-works">{item}</a>)}</div>
+        <div className="landing-nav-links">{navigationItems.map((item) => <a key={item.label} href={item.href}>{item.label}</a>)}</div>
         <Link className="landing-button landing-button-nav" href="/register">Get Started</Link>
         <LandingMobileMenu items={navigationItems} />
       </nav>
@@ -123,7 +128,7 @@ export default function Home() {
         <p className="landing-section-intro">From farm registration to market scan, every step is signed, timestamped, and visible.</p>
         <div className="landing-process-grid">{processCards.map(({number,title,copy}) => <article key={title} className="landing-process-card"><span className="landing-step">{number}</span><h3>{title}</h3><p>{copy}</p></article>)}</div>
       </section>
-      <section className="landing-farmers" aria-labelledby="farmer-heading">
+      <section id="for-farmers" className="landing-farmers" aria-labelledby="farmer-heading">
         <div className="landing-farmer-copy">
           <p className="landing-eyebrow">BUILT FOR AFRICA</p>
           <h2 id="farmer-heading">Accessible to <span className="landing-green-text">every farmer</span></h2>
@@ -136,7 +141,7 @@ export default function Home() {
         <div className="landing-stats-grid">{stats.map(({value,label},index) => <div key={label} className={"landing-stat landing-stat-"+index}><strong>{value}</strong><span>{label}</span></div>)}</div>
         <p>Illustrative figures · not live platform metrics</p>
       </section>
-      <section className="landing-regulators" aria-labelledby="regulator-heading">
+      <section id="for-regulators" className="landing-regulators" aria-labelledby="regulator-heading">
         <div><p className="landing-eyebrow">FOR REGULATORS</p><h2 id="regulator-heading">Government-grade<br />oversight</h2><p className="landing-description">Real-time visibility into compliance, biosafety status, and supply chain activity across regions.</p><Link className="landing-text-link" href="/onboarding">For Regulators <span aria-hidden="true">↗</span></Link></div>
         <figure className="landing-dashboard"><Image src="/landing/agritrust-regulator-dashboard.png" alt="Illustrative AgriTrust regulator dashboard with a Nigerian compliance map, batch volume chart, compliance ring and alerts table" width={1672} height={941} unoptimized /><figcaption>Illustrative dashboard preview · not live regulatory data</figcaption></figure>
       </section>
