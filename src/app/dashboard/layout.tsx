@@ -93,7 +93,12 @@ export default function DashboardLayout({
     }
 
     window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape);
+      document.body.style.overflow = previousOverflow;
+    };
   }, [isMobileOpen]);
 
   useEffect(() => {
@@ -171,12 +176,13 @@ export default function DashboardLayout({
         <TopBar
           authenticatedUserId={currentUser?.userId}
           onMenuClick={() => setIsMobileOpen((current) => !current)}
+          isMenuOpen={isMobileOpen}
           userName={currentUser?.userName}
           email={currentUser?.email}
           role={currentUser?.role}
           initials={currentUser?.initials}
         />
-        <main className="min-h-screen pt-28 lg:pt-16">{children}</main>
+        <main className="dashboard-main min-h-screen min-w-0 pt-28 lg:pt-16">{children}</main>
       </div>
     </div>
   );

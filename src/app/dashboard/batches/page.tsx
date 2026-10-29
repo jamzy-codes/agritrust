@@ -72,7 +72,7 @@ export default function BatchesPage() {
         </p>
       </header>
 
-      <div className="mb-6 flex gap-4 px-8">
+      <div className="mb-6 flex flex-wrap gap-4 px-8">
         {stats.map((stat) => (
           <div
             key={stat.label}
@@ -85,10 +85,10 @@ export default function BatchesPage() {
       </div>
 
       <div className="mb-6 flex flex-wrap items-center gap-3 px-8">
-        <div className="relative">
+        <div className="relative w-full sm:w-auto">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-agri-muted" />
           <input
-            className="w-72 rounded-lg border border-agri-border bg-agri-surface py-2 pl-9 pr-4 text-sm text-agri-text placeholder:text-agri-muted focus:border-agri-border-focus focus:outline-none"
+            className="w-full rounded-lg border border-agri-border bg-agri-surface py-2 pl-9 pr-4 text-sm text-agri-text placeholder:text-agri-muted focus:border-agri-border-focus focus:outline-none sm:w-72"
             placeholder="Search by batch ID or crop..."
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -102,7 +102,7 @@ export default function BatchesPage() {
         </select>
       </div>
 
-      <div className="mx-8 overflow-hidden rounded-xl border border-agri-border bg-agri-surface">
+      <div className="mx-8 overflow-x-auto rounded-xl border border-agri-border bg-agri-surface">
         <table className="min-w-full">
           <thead className="bg-agri-raised">
             <tr>

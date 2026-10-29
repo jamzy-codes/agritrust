@@ -76,19 +76,15 @@ export interface NormalizedFarmRecord {
   id: string | null;
   owner_id: string | null;
   farm_name: string | null;
-  name: string | null;
   location: string | null;
-  region: string | null;
   gps_coordinates: string | null;
   nasc_registration: string | null;
   primary_crops: unknown;
   farm_photo_url: string | null;
   created_at: string | null;
-  updated_at: string | null;
 }
 
 export interface NormalizedBatchRecord {
-  id: string | null;
   batch_id: string | null;
   farm_id: string | null;
   registered_by: string | null;
@@ -98,11 +94,8 @@ export interface NormalizedBatchRecord {
   is_gmo_free: boolean | null;
   gmo_status: string | null;
   status: string | null;
-  metadata_uri: string | null;
-  metadata_hash: string | null;
   tx_hash: string | null;
   registered_at: string | null;
-  updated_at: string | null;
 }
 
 export function normalizeFarmRecord(record: DataRecord | null | undefined): NormalizedFarmRecord {
@@ -111,15 +104,12 @@ export function normalizeFarmRecord(record: DataRecord | null | undefined): Norm
       id: null,
       owner_id: null,
       farm_name: null,
-      name: null,
       location: null,
-      region: null,
       gps_coordinates: null,
       nasc_registration: null,
       primary_crops: null,
       farm_photo_url: null,
       created_at: null,
-      updated_at: null,
     };
   }
 
@@ -127,15 +117,12 @@ export function normalizeFarmRecord(record: DataRecord | null | undefined): Norm
     id: asString(record, ["id"]),
     owner_id: asString(record, ["owner_id", "ownerId"]),
     farm_name: asString(record, ["farm_name", "name"]),
-    name: asString(record, ["name", "farm_name"]),
     location: asString(record, ["location", "region"]),
-    region: asString(record, ["region", "location"]),
     gps_coordinates: asString(record, ["gps_coordinates", "gpsCoordinates"]),
     nasc_registration: asString(record, ["nasc_registration", "nascRegistration"]),
     primary_crops: readValue(record, ["primary_crops", "primaryCrops"]),
     farm_photo_url: asString(record, ["farm_photo_url", "farmPhotoUrl"]),
     created_at: asString(record, ["created_at", "createdAt"]),
-    updated_at: asString(record, ["updated_at", "updatedAt"]),
   };
 }
 
@@ -147,9 +134,7 @@ export function buildFarmPayload(body: DataRecord) {
   return {
     owner_id: ownerId,
     farm_name: farmName,
-    name: farmName,
     location,
-    region: location,
     gps_coordinates: asString(body, ["gpsCoordinates", "gps_coordinates"]),
     nasc_registration: asString(body, ["nascRegistration", "nasc_registration"]),
     primary_crops: readValue(body, ["primaryCrops", "primary_crops"]),
@@ -160,7 +145,6 @@ export function buildFarmPayload(body: DataRecord) {
 export function normalizeBatchRecord(record: DataRecord | null | undefined): NormalizedBatchRecord {
   if (!record) {
     return {
-      id: null,
       batch_id: null,
       farm_id: null,
       registered_by: null,
@@ -170,16 +154,12 @@ export function normalizeBatchRecord(record: DataRecord | null | undefined): Nor
       is_gmo_free: null,
       gmo_status: null,
       status: null,
-      metadata_uri: null,
-      metadata_hash: null,
       tx_hash: null,
       registered_at: null,
-      updated_at: null,
     };
   }
 
   return {
-    id: asString(record, ["id"]),
     batch_id: asString(record, ["batch_id", "batchId", "batch_number"]),
     farm_id: asString(record, ["farm_id", "farmId"]),
     registered_by: asString(record, ["registered_by", "registeredBy"]),
@@ -189,11 +169,8 @@ export function normalizeBatchRecord(record: DataRecord | null | undefined): Nor
     is_gmo_free: asBoolean(record, ["is_gmo_free", "isGMOFree"]),
     gmo_status: asString(record, ["gmo_status", "gmoStatus"]),
     status: asString(record, ["status"]),
-    metadata_uri: asString(record, ["metadata_uri", "metadataUri"]),
-    metadata_hash: asString(record, ["metadata_hash", "metadataHash"]),
     tx_hash: asString(record, ["tx_hash", "txHash"]),
     registered_at: asString(record, ["registered_at", "registeredAt"]),
-    updated_at: asString(record, ["updated_at", "updatedAt"]),
   };
 }
 
@@ -204,7 +181,6 @@ export function buildBatchPayload(body: DataRecord) {
 
   return {
     batch_id: batchId,
-    id: batchId,
     farm_id: farmId,
     registered_by: registeredBy,
     crop_type: asString(body, ["cropType", "crop_type"]),
@@ -214,8 +190,6 @@ export function buildBatchPayload(body: DataRecord) {
     gmo_status: asString(body, ["gmoStatus", "gmo_status"]) ?? "farmer_declared",
     status: asString(body, ["status"]) ?? "REGISTERED",
     tx_hash: asString(body, ["txHash", "tx_hash"]),
-    metadata_uri: asString(body, ["metadataUri", "metadata_uri"]),
-    metadata_hash: asString(body, ["metadataHash", "metadata_hash"]),
   };
 }
 
@@ -223,15 +197,12 @@ export interface NormalizedInspectionRecord {
   id: string | null;
   batch_id: string | null;
   inspector_id: string | null;
-  result: string | null;
-  notes: string | null;
-  passed: boolean | null;
+  weight_kg: number | null;
   quality_grade: string | null;
   gmo_test_result: string | null;
   certificate_issued: boolean | null;
   tx_hash: string | null;
-  created_at: string | null;
-  updated_at: string | null;
+  inspected_at: string | null;
 }
 
 export function normalizeInspectionRecord(record: DataRecord | null | undefined): NormalizedInspectionRecord {
@@ -240,15 +211,12 @@ export function normalizeInspectionRecord(record: DataRecord | null | undefined)
       id: null,
       batch_id: null,
       inspector_id: null,
-      result: null,
-      notes: null,
-      passed: null,
+      weight_kg: null,
       quality_grade: null,
       gmo_test_result: null,
       certificate_issued: null,
       tx_hash: null,
-      created_at: null,
-      updated_at: null,
+      inspected_at: null,
     };
   }
 
@@ -256,15 +224,12 @@ export function normalizeInspectionRecord(record: DataRecord | null | undefined)
     id: asString(record, ["id"]),
     batch_id: asString(record, ["batch_id", "batchId"]),
     inspector_id: asString(record, ["inspector_id", "inspectorId"]),
-    result: asString(record, ["result", "inspection_result"]),
-    notes: asString(record, ["notes"]),
-    passed: asBoolean(record, ["passed"]),
+    weight_kg: asNumber(record, ["weight_kg", "weightKg"]),
     quality_grade: asString(record, ["quality_grade", "qualityGrade"]),
     gmo_test_result: asString(record, ["gmo_test_result", "gmoTestResult"]),
     certificate_issued: asBoolean(record, ["certificate_issued", "certificateIssued"]),
     tx_hash: asString(record, ["tx_hash", "txHash"]),
-    created_at: asString(record, ["created_at", "createdAt"]),
-    updated_at: asString(record, ["updated_at", "updatedAt"]),
+    inspected_at: asString(record, ["inspected_at", "inspectedAt"]),
   };
 }
 
@@ -272,16 +237,14 @@ export function buildInspectionPayload(body: DataRecord) {
   return {
     batch_id: asString(body, ["batchId", "batch_id"]),
     inspector_id: asString(body, ["inspectorId", "inspector_id"]),
-    result: asString(body, ["result", "inspection_result"]) ?? "PENDING",
-    notes: asString(body, ["notes"]),
-    passed: asBoolean(body, ["passed"]) ?? false,
+    weight_kg: asNumber(body, ["weightKg", "weight_kg"]),
     quality_grade: asString(body, ["qualityGrade", "quality_grade"]),
     gmo_test_result: asString(body, ["gmoTestResult", "gmo_test_result"]),
     certificate_issued: asBoolean(body, ["certificateIssued", "certificate_issued"]) ?? false,
     tx_hash: asString(body, ["txHash", "tx_hash"]),
+    inspected_at: asString(body, ["inspectedAt", "inspected_at"]),
   };
 }
-
 export interface NormalizedCertificateRecord {
   id: string | null;
   batch_id: string | null;

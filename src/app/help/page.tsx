@@ -40,12 +40,12 @@ const faqs = [
   {
     question: "Is my data secure on the blockchain?",
     answer:
-      "Yes. All records are stored on the blockchain and are immutable - they cannot be edited or deleted once submitted. Only the wallet that registered a batch can initiate updates.",
+      "Blockchain lifecycle records are immutable once confirmed. Authorized Inspectors and Distributors can add later inspection, custody, or delivery events according to the deployed contracts.",
   },
   {
     question: "How do I connect my Web3 wallet?",
     answer:
-      "On the login or register page, click 'Connect Web3 Wallet'. AgriTrust supports MetaMask and other WalletConnect-compatible wallets.",
+      "On the login or register page, click 'Connect Web3 Wallet'. Use a supported injected mobile or desktop wallet and switch it to Polygon Amoy (chain 80002).",
   },
 ];
 
@@ -82,16 +82,16 @@ export default function HelpPage() {
 
   return (
     <main className="min-h-screen bg-agri-base">
-      <header className="flex items-center justify-between border-b border-agri-border px-8 py-4">
-        <Link href="/">
+      <header className="flex items-center justify-between gap-3 border-b border-agri-border px-4 py-4 sm:px-8">
+        <Link className="inline-flex min-h-10 items-center" href="/">
           <BrandLogo size="sm" />
         </Link>
-        <Link className="text-sm text-accent-blue" href="/dashboard">
+        <Link className="inline-flex min-h-10 items-center text-sm text-accent-blue" href="/dashboard">
           Go to Dashboard -&gt;
         </Link>
       </header>
 
-      <section className="px-8 py-16 text-center">
+      <section className="px-4 py-12 text-center sm:px-8 sm:py-16">
         <HelpCircle className="mx-auto mb-4 h-12 w-12 text-accent-blue" />
         <h1
           className="mb-3 text-4xl font-bold text-agri-text"
@@ -104,7 +104,7 @@ export default function HelpPage() {
         </p>
       </section>
 
-      <section className="mx-auto grid max-w-5xl grid-cols-1 gap-8 px-8 pb-16 lg:grid-cols-[1fr_340px]">
+      <section className="mx-auto grid max-w-5xl grid-cols-1 gap-8 px-4 pb-16 sm:px-8 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div>
           <h2
             className="mb-6 text-xl font-bold text-agri-text"
@@ -186,12 +186,12 @@ export default function HelpPage() {
         </aside>
       </section>
 
-      <footer className="flex items-center justify-between border-t border-agri-border px-8 py-6">
+      <footer className="flex flex-col items-start justify-between gap-3 border-t border-agri-border px-4 py-6 sm:flex-row sm:items-center sm:px-8">
         <p className="text-sm text-agri-muted">
           © 2026 AgriTrust. All Rights Reserved. Team Innovaro
         </p>
         <Link
-          className="text-sm text-agri-muted hover:text-agri-text"
+          className="inline-flex min-h-10 items-center text-sm text-agri-muted hover:text-agri-text"
           href="/"
         >
           &lt;- Back to home

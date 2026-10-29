@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { apiAuthErrorResponse, ApiAuthError, requireApiProfile } from "@/lib/server/api-auth";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
+    const profile = await requireApiProfile(request);
     const { data, error } = await supabaseAdmin
       .from("farms")
       .select("*")
@@ -21,9 +23,14 @@ export async function GET(
     if (!data) {
       return NextResponse.json({ error: "Farm not found" }, { status: 404 });
     }
+    if (profile.role === "FARMER" && data.owner_id !== profile.id) {
+      throw new ApiAuthError("You may only view your own farm.", 403);
+    }
 
     return NextResponse.json({ farm: data });
   } catch (error) {
+    const authResponse = apiAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     const message = error instanceof Error ? error.message : "Unexpected error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -35,6 +42,17 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
+    const profile = await requireApiProfile(request, ["FARMER", "REGULATOR"]);
+    const { data: existingFarm, error: existingError } = await supabaseAdmin
+      .from("farms")
+      .select("owner_id")
+      .eq("id", id)
+      .maybeSingle();
+    if (existingError) return NextResponse.json({ error: existingError.message }, { status: 400 });
+    if (!existingFarm) return NextResponse.json({ error: "Farm not found" }, { status: 404 });
+    if (profile.role !== "REGULATOR" && existingFarm.owner_id !== profile.id) {
+      throw new ApiAuthError("You may only update your own farm.", 403);
+    }
     const body = await request.json();
     const updatePayload = {
       farm_name: body.farmName ?? body.farm_name,
@@ -45,7 +63,6 @@ export async function PATCH(
         ? body.primaryCrops
         : body.primary_crops,
       farm_photo_url: body.farmPhotoUrl ?? body.farm_photo_url,
-      updated_at: new Date().toISOString(),
     };
 
     const cleanedPayload = Object.fromEntries(
@@ -69,6 +86,8 @@ export async function PATCH(
 
     return NextResponse.json({ farm: data });
   } catch (error) {
+    const authResponse = apiAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     const message = error instanceof Error ? error.message : "Unexpected error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

@@ -18,7 +18,7 @@ import BrandLogo from "@/components/brand/BrandLogo";
 import { supabase } from "@/lib/supabase";
 import {
   fetchRealAlerts,
-  getLastViewedAlertsAt,
+  getAlertsReadState,
   logAlertsError,
   markAlertsAsViewed,
   type RealAlert,
@@ -33,6 +33,7 @@ interface TopBarProps {
   role?: UserRole;
   initials?: string;
   onMenuClick?: () => void;
+  isMenuOpen?: boolean;
 }
 
 const roleStyles: Record<UserRole, { avatar: string }> = {
@@ -61,12 +62,14 @@ export default function TopBar({
   role = "FARMER",
   initials = "U",
   onMenuClick,
+  isMenuOpen = false,
 }: TopBarProps) {
   const [isAlertsOpen, setIsAlertsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [alerts, setAlerts] = useState<RealAlert[]>([]);
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const [alertsError, setAlertsError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const styles = roleStyles[role];
   const router = useRouter();
@@ -94,15 +97,18 @@ export default function TopBar({
         setAlertsError(null);
 
         if (currentUserId) {
-          const lastViewedAt = await getLastViewedAlertsAt(currentUserId);
+          const readState = await getAlertsReadState(currentUserId);
           if (!isActive) return;
 
-          const unread = lastViewedAt
+          const unread = readState.lastViewedAt
             ? realAlerts.filter(
-                (alert) => new Date(alert.rawTime).getTime() > new Date(lastViewedAt).getTime(),
+                (alert) => new Date(alert.rawTime).getTime() > new Date(readState.lastViewedAt!).getTime(),
               ).length
             : realAlerts.length;
           setUnreadCount(unread);
+          if (!readState.databaseAuthoritative) {
+            setAlertsError("Read state is temporarily saved on this device only.");
+          }
         } else {
           setUnreadCount(realAlerts.length);
         }
@@ -143,7 +149,10 @@ export default function TopBar({
 
     if (nextState && authenticatedUserId) {
       setUnreadCount(0);
-      await markAlertsAsViewed(authenticatedUserId);
+      const result = await markAlertsAsViewed(authenticatedUserId);
+      if (!result.databasePersisted) {
+        setAlertsError("Read state is temporarily saved on this device only.");
+      }
     }
   };
 
@@ -172,22 +181,37 @@ export default function TopBar({
           className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-agri-muted hover:bg-agri-raised hover:text-agri-text lg:hidden"
           onClick={onMenuClick}
           aria-label="Toggle navigation"
+          aria-controls="dashboard-navigation"
+          aria-expanded={isMenuOpen}
         >
           <Menu className="h-5 w-5" />
         </button>
 
         <BrandLogo className="shrink-0 lg:-ml-4" size="sm" />
 
-        <div className="order-3 w-full flex-none lg:order-none lg:mx-auto lg:max-w-md lg:flex-1">
+        <form
+          className="order-3 w-full flex-none lg:order-none lg:mx-auto lg:max-w-md lg:flex-1"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const query = searchQuery.trim();
+            if (!query) return;
+            window.sessionStorage.setItem("agritrust_dashboard_search", query);
+            router.push("/dashboard/trace");
+          }}
+          role="search"
+        >
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-agri-muted" />
             <input
               className="w-full rounded-lg border border-agri-border bg-agri-raised py-2 pl-9 pr-4 text-sm text-agri-text placeholder:text-agri-muted transition-colors focus:border-agri-border-focus focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)]"
               placeholder={searchPlaceholder}
               type="search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              aria-label="Search batches, farms, or custodians"
             />
           </div>
-        </div>
+        </form>
 
         <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3 lg:gap-4">
           <div className="relative">
@@ -209,7 +233,7 @@ export default function TopBar({
 
             {isAlertsOpen && (
               <div
-                className="fixed left-3 right-3 top-28 z-50 overflow-hidden rounded-xl border border-agri-border bg-agri-surface shadow-xl sm:left-auto sm:right-4 sm:w-80 lg:absolute lg:right-0 lg:top-12"
+                className="fixed left-3 right-3 top-28 z-50 max-h-[calc(100dvh-7.75rem)] overflow-hidden rounded-xl border border-agri-border bg-agri-surface shadow-xl sm:left-auto sm:right-4 sm:w-80 lg:absolute lg:right-0 lg:top-12 lg:max-h-[calc(100dvh-5rem)]"
                 onClick={(event) => event.stopPropagation()}
               >
                 <div className="flex items-center justify-between border-b border-agri-border px-4 py-3">
@@ -225,10 +249,10 @@ export default function TopBar({
                   <div className="p-6 text-center text-xs text-accent-red">{alertsError}</div>
                 ) : alerts.length === 0 ? (
                   <div className="p-6 text-center text-xs text-agri-muted">
-                    No active alerts at this time.
+                    No notifications are available at this time.
                   </div>
                 ) : (
-                  <div className="max-h-72 overflow-y-auto">
+                  <div className="max-h-72 overflow-y-auto overscroll-contain">
                     {alerts.slice(0, 3).map((alert) => {
                       const dotColor =
                         alert.type === "critical"
@@ -269,7 +293,12 @@ export default function TopBar({
                   className="block border-t border-agri-border px-4 py-3 text-center text-sm font-medium text-accent-blue hover:bg-agri-raised"
                   onClick={async () => {
                     setIsAlertsOpen(false);
-                    if (authenticatedUserId) await markAlertsAsViewed(authenticatedUserId);
+                    if (authenticatedUserId) {
+                      const result = await markAlertsAsViewed(authenticatedUserId);
+                      if (!result.databasePersisted) {
+                        setAlertsError("Read state is temporarily saved on this device only.");
+                      }
+                    }
                   }}
                 >
                   View all alerts &rarr;
@@ -310,7 +339,7 @@ export default function TopBar({
 
             {isProfileOpen && (
               <div
-                className="fixed left-3 right-3 top-28 z-50 overflow-hidden rounded-xl border border-agri-border bg-agri-surface shadow-xl sm:left-auto sm:right-4 sm:w-56 lg:absolute lg:right-0 lg:top-14"
+                className="fixed left-3 right-3 top-28 z-50 max-h-[calc(100dvh-7.75rem)] overflow-y-auto overscroll-contain rounded-xl border border-agri-border bg-agri-surface shadow-xl sm:left-auto sm:right-4 sm:w-56 lg:absolute lg:right-0 lg:top-14 lg:max-h-[calc(100dvh-5rem)]"
                 onClick={(event) => event.stopPropagation()}
               >
                 <div className="border-b border-agri-border px-4 py-3">

@@ -161,7 +161,7 @@ async function loadReportRows(
   if (reportType === "batches") {
     let query = supabase
       .from("batches")
-      .select("batch_id, registered_by, crop_type, quantity_kg, seed_variety, gmo_status, status, registered_at, updated_at")
+      .select("batch_id, registered_by, crop_type, quantity_kg, seed_variety, gmo_status, status, registered_at")
       .gte("registered_at", startDate)
       .order("registered_at", { ascending: false });
 
@@ -199,7 +199,7 @@ async function loadReportRows(
   }
 
   const [batches, inspections, farms, handoffs] = await Promise.all([
-    supabase.from("batches").select("id", { count: "exact", head: true }).gte("registered_at", startDate),
+    supabase.from("batches").select("batch_id", { count: "exact", head: true }).gte("registered_at", startDate),
     supabase.from("inspections").select("id", { count: "exact", head: true }).gte("inspected_at", startDate),
     supabase.from("farms").select("id", { count: "exact", head: true }).gte("created_at", startDate),
     supabase.from("handoffs").select("id", { count: "exact", head: true }).gte("handed_off_at", startDate),

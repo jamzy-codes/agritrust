@@ -34,7 +34,6 @@ import {
   produceRegistryContract,
   supplyChainLedgerContract,
 } from "@/lib/contracts";
-import { PRIMARY_BATCH, TX_HASHES } from "@/lib/mockData";
 import { supabase } from "@/lib/supabase";
 import { wagmiConfig } from "@/lib/wagmi";
 import VerificationQr from "@/components/verification/VerificationQr";
@@ -213,6 +212,51 @@ interface InspectionSyncResponse {
   };
 }
 
+interface DistributionSyncResponse {
+  batchId: string;
+  synchronized: boolean;
+  mismatches: string[];
+  blockchain: {
+    batchStatus: "REGISTERED" | "INSPECTED" | "IN_TRANSIT" | "DELIVERED" | "FLAGGED";
+    databaseTargetStatus: "REGISTERED" | "CERTIFIED" | "IN_TRANSIT" | "DELIVERED" | "FLAGGED";
+    events: Array<{
+      type: "HANDOFF" | "DELIVERY";
+      transactionHash: `0x${string}`;
+      timestamp: string;
+    }>;
+  };
+}
+
+const DISTRIBUTION_SYNC_BATCH_KEY = "agritrust_pending_distribution_sync";
+const DISTRIBUTION_SYNC_TYPE_KEY = "agritrust_pending_distribution_type";
+
+async function requestDistributionSynchronization(
+  batchId: string,
+  method: "GET" | "POST",
+): Promise<DistributionSyncResponse> {
+  const { data, error } = await supabase.auth.getSession();
+  if (error || !data.session?.access_token) {
+    throw new Error("Your Distributor session is unavailable. Sign in again and retry synchronization.");
+  }
+  const query = method === "GET" ? `?batchId=${encodeURIComponent(batchId)}` : "";
+  const response = await fetch(`/api/sync/distribution${query}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${data.session.access_token}`,
+      ...(method === "POST" ? { "Content-Type": "application/json" } : {}),
+    },
+    ...(method === "POST" ? { body: JSON.stringify({ batchId }) } : {}),
+  });
+  const body = (await response.json().catch(() => null)) as
+    | (DistributionSyncResponse & { error?: string; stage?: string })
+    | null;
+  if (!response.ok || !body) {
+    const stage = body?.stage ? ` (${body.stage})` : "";
+    throw new Error((body?.error || "Synchronization request failed.") + stage);
+  }
+  return body;
+}
+
 async function requestInspectionSynchronization(
   batchId: string,
   method: "GET" | "POST",
@@ -343,7 +387,7 @@ function SearchRow({
   isLoading?: boolean;
 }) {
   return (
-    <div className="mb-6 flex gap-3 px-8">
+    <div className="mb-6 flex flex-col gap-3 px-8 sm:flex-row">
       <div className="relative flex-1">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-agri-muted" />
         <input
@@ -376,30 +420,35 @@ function LoadedBatchCard({
   status,
 }: {
   batchId: string;
-  status: "AWAITING INSPECTION" | "INSPECTED ON-CHAIN" | "CERTIFIED";
+  status:
+    | "AWAITING INSPECTION"
+    | "INSPECTED ON-CHAIN"
+    | "CERTIFIED"
+    | "IN_TRANSIT"
+    | "DELIVERED";
 }) {
   return (
-    <div className="mx-8 mb-6 flex items-center gap-4 rounded-xl border border-agri-border bg-agri-raised p-4">
+    <div className="mx-8 mb-6 flex flex-wrap items-center gap-4 rounded-xl border border-agri-border bg-agri-raised p-4">
       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent-green/20">
         <Leaf className="h-5 w-5 text-accent-green" />
       </div>
       <div className="flex-1">
         <p className="font-mono font-bold text-agri-text">
-          {batchId || PRIMARY_BATCH.batchId}
+          {batchId}
         </p>
         <p className="text-sm text-agri-muted">
-          {PRIMARY_BATCH.cropType} · {PRIMARY_BATCH.quantityKg} kg
+          Verified lifecycle record
         </p>
         <p className="mt-0.5 text-xs text-agri-muted">
-          Farm: {PRIMARY_BATCH.farmName}, {PRIMARY_BATCH.region}
+          Status source: Polygon Amoy and AgriTrust
         </p>
         <p className="text-xs text-agri-muted">
-          Registered: {PRIMARY_BATCH.registeredAt}
+          Inspection and certificate history are preserved.
         </p>
       </div>
       <span
-        className={`ml-auto shrink-0 rounded-full px-3 py-1.5 text-xs font-bold ${
-          status === "CERTIFIED"
+        className={`w-full rounded-full px-3 py-1.5 text-center text-xs font-bold sm:ml-auto sm:w-auto sm:shrink-0 ${
+          status === "CERTIFIED" || status === "DELIVERED"
             ? "bg-accent-green/20 text-accent-green"
             : "bg-accent-amber/20 text-accent-amber"
         }`}
@@ -1979,11 +2028,12 @@ function VerifyBatchTab() {
 }
 
 function HandoffTab() {
-  const { isConnected } = useAccount();
+  const { address, chainId, isConnected } = useAccount();
   const { openConnectModal } = useConnectModal();
+  const publicClient = usePublicClient();
   const { writeContractAsync } = useWriteContract();
 
-  const [searchBatchId, setSearchBatchId] = useState<string>("AGT-0042");
+  const [searchBatchId, setSearchBatchId] = useState<string>("");
   const [handoffType, setHandoffType] = useState<HandoffType>(
     "Warehouse to Distributor"
   );
@@ -1995,71 +2045,162 @@ function HandoffTab() {
   const [condition, setCondition] = useState<string>("Good condition");
   const [transportMethod, setTransportMethod] = useState<string>("Refrigerated truck");
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState<string>("");
-  const [userId, setUserId] = useState<string | null>(null);
-
   const [statusStage, setStatusStage] = useState<
-    "idle" | "wallet_pending" | "confirming_onchain" | "success" | "error"
+    | "idle"
+    | "wallet_pending"
+    | "confirming_onchain"
+    | "sync_pending"
+    | "sync_failed"
+    | "success"
+    | "error"
   >("idle");
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
+  const [pendingActionType, setPendingActionType] = useState<"HANDOFF" | "DELIVERY">("HANDOFF");
+  const [loadedBatchStatus, setLoadedBatchStatus] = useState<
+    "CERTIFIED" | "IN_TRANSIT" | "DELIVERED" | null
+  >(null);
+  const [isLoadingBatch, setIsLoadingBatch] = useState(false);
 
-  const { isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash: txHash });
+  const { isSuccess: isConfirmed, isError: receiptFailed } = useWaitForTransactionReceipt({ hash: txHash });
 
   useEffect(() => {
-    async function loadUser() {
-      const { data: userData, error: userError } =
-        await supabase.auth.getUser();
-      if (!userError && userData.user) {
-        setUserId(userData.user.id);
-      }
+    async function recoverPendingSynchronization() {
+      const pendingBatchId = window.localStorage.getItem(DISTRIBUTION_SYNC_BATCH_KEY);
+      if (!pendingBatchId || !/^[A-Za-z0-9-]{1,100}$/.test(pendingBatchId)) return;
+      const storedType = window.localStorage.getItem(DISTRIBUTION_SYNC_TYPE_KEY) === "DELIVERY"
+        ? "DELIVERY"
+        : "HANDOFF";
+
+      // Cross an async boundary before restoring client-only recovery state.
+      // This keeps the effect focused on synchronizing with localStorage.
+      await Promise.resolve();
+      setPendingActionType(storedType);
+      setSearchBatchId(pendingBatchId);
+      setIsLoadingBatch(true);
+      await requestDistributionSynchronization(pendingBatchId, "GET")
+        .then((state) => {
+          setLoadedBatchStatus(state.blockchain.databaseTargetStatus as typeof loadedBatchStatus);
+          const latestOwnEvent = state.blockchain.events.at(-1);
+          if (latestOwnEvent) {
+            setTxHash(latestOwnEvent.transactionHash);
+            setPendingActionType(latestOwnEvent.type);
+          }
+          if (!state.synchronized) {
+            setErrorMessage(
+              "A confirmed blockchain record is awaiting database synchronization. " +
+                state.mismatches.join(" "),
+            );
+            setStatusStage("sync_failed");
+          } else {
+            window.localStorage.removeItem(DISTRIBUTION_SYNC_BATCH_KEY);
+            window.localStorage.removeItem(DISTRIBUTION_SYNC_TYPE_KEY);
+          }
+        })
+        .catch((error) => {
+          setErrorMessage(
+            `${storedType === "DELIVERY" ? "Delivery" : "Handoff"} recorded on-chain, but database synchronization is pending. ` +
+              (error instanceof Error ? error.message : String(error)),
+          );
+          setStatusStage("sync_failed");
+        })
+        .finally(() => setIsLoadingBatch(false));
     }
-    loadUser();
+
+    void recoverPendingSynchronization();
   }, []);
 
   useEffect(() => {
     if (isConfirmed && txHash && statusStage === "confirming_onchain") {
-      async function recordHandoffSuccess() {
+      async function synchronizeConfirmedTransaction() {
+        setStatusStage("sync_pending");
+        window.localStorage.setItem(DISTRIBUTION_SYNC_BATCH_KEY, searchBatchId);
+        window.localStorage.setItem(DISTRIBUTION_SYNC_TYPE_KEY, pendingActionType);
         try {
-          const { error: handoffErr } = await supabase
-            .from("handoffs")
-            .insert({
-              batch_id: searchBatchId,
-              distributor_id: userId,
-              from_party: fromParty,
-              to_party: receivingPartyName,
-              location: handoffLocation,
-              condition: condition,
-              transport_method: transportMethod,
-              tx_hash: txHash,
-              handed_off_at: new Date().toISOString(),
-            });
-
-          if (handoffErr) {
-            console.error("Handoffs table insert error:", handoffErr);
-          }
-
-          const targetStatus =
-            handoffType === "Distributor to Market" ? "DELIVERED" : "IN_TRANSIT";
-
-          const { error: batchErr } = await supabase
-            .from("batches")
-            .update({ status: targetStatus })
-            .eq("batch_id", searchBatchId);
-
-          if (batchErr) {
-            console.error("Batches table update error:", batchErr);
-          }
-
+          const synchronized = await requestDistributionSynchronization(searchBatchId, "POST");
+          if (!synchronized.synchronized) throw new Error(synchronized.mismatches.join(" "));
+          setLoadedBatchStatus(synchronized.blockchain.databaseTargetStatus as typeof loadedBatchStatus);
+          window.localStorage.removeItem(DISTRIBUTION_SYNC_BATCH_KEY);
+          window.localStorage.removeItem(DISTRIBUTION_SYNC_TYPE_KEY);
           setStatusStage("success");
         } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err);
-          setErrorMessage(`Database update failed: ${message}`);
-          setStatusStage("error");
+          setErrorMessage(
+            `${pendingActionType === "DELIVERY" ? "Delivery" : "Handoff"} recorded on-chain, but database synchronization is pending. ` +
+              (err instanceof Error ? err.message : String(err)),
+          );
+          setStatusStage("sync_failed");
         }
       }
-      recordHandoffSuccess();
+      void synchronizeConfirmedTransaction();
     }
-  }, [isConfirmed, txHash, statusStage, searchBatchId, userId, fromParty, receivingPartyName, handoffLocation, condition, transportMethod, handoffType]);
+  }, [isConfirmed, loadedBatchStatus, pendingActionType, searchBatchId, statusStage, txHash]);
+
+  useEffect(() => {
+    if (receiptFailed && statusStage === "confirming_onchain") {
+      queueMicrotask(() => {
+        setErrorMessage("The blockchain transaction failed and no database changes were made.");
+        setStatusStage("error");
+      });
+    }
+  }, [receiptFailed, statusStage]);
+
+  async function handleLoadBatch() {
+    const batchId = searchBatchId.trim();
+    if (!batchId) return;
+    setIsLoadingBatch(true);
+    setErrorMessage("");
+    try {
+      const state = await requestDistributionSynchronization(batchId, "GET");
+      setLoadedBatchStatus(state.blockchain.databaseTargetStatus as typeof loadedBatchStatus);
+      const latestOwnEvent = state.blockchain.events.at(-1);
+      if (latestOwnEvent) {
+        setTxHash(latestOwnEvent.transactionHash);
+        setPendingActionType(latestOwnEvent.type);
+      }
+      if (!state.synchronized) {
+        window.localStorage.setItem(DISTRIBUTION_SYNC_BATCH_KEY, batchId);
+        window.localStorage.setItem(DISTRIBUTION_SYNC_TYPE_KEY, latestOwnEvent?.type ?? "HANDOFF");
+        setErrorMessage(
+          "A confirmed blockchain record is awaiting database synchronization. " +
+            state.mismatches.join(" "),
+        );
+        setStatusStage("sync_failed");
+      } else {
+        window.localStorage.removeItem(DISTRIBUTION_SYNC_BATCH_KEY);
+        window.localStorage.removeItem(DISTRIBUTION_SYNC_TYPE_KEY);
+        setStatusStage("idle");
+      }
+    } catch (error) {
+      setLoadedBatchStatus(null);
+      setErrorMessage(error instanceof Error ? error.message : "The batch could not be loaded.");
+      setStatusStage("error");
+    } finally {
+      setIsLoadingBatch(false);
+    }
+  }
+
+  async function retrySynchronization() {
+    setStatusStage("sync_pending");
+    setErrorMessage("");
+    try {
+      const state = await requestDistributionSynchronization(searchBatchId.trim(), "POST");
+      setLoadedBatchStatus(state.blockchain.databaseTargetStatus as typeof loadedBatchStatus);
+      const latestOwnEvent = state.blockchain.events.at(-1);
+      if (latestOwnEvent) {
+        setTxHash(latestOwnEvent.transactionHash);
+        setPendingActionType(latestOwnEvent.type);
+      }
+      window.localStorage.removeItem(DISTRIBUTION_SYNC_BATCH_KEY);
+      window.localStorage.removeItem(DISTRIBUTION_SYNC_TYPE_KEY);
+      setStatusStage("success");
+    } catch (error) {
+      setErrorMessage(
+        `${pendingActionType === "DELIVERY" ? "Delivery" : "Handoff"} recorded on-chain, but database synchronization is pending. ` +
+          (error instanceof Error ? error.message : String(error)),
+      );
+      setStatusStage("sync_failed");
+    }
+  }
 
   async function handleRecordHandoff() {
     if (!isConnected) {
@@ -2067,45 +2208,136 @@ function HandoffTab() {
       return;
     }
 
+    if (!publicClient || !address) {
+      setErrorMessage("The Polygon Amoy wallet client is unavailable. Reconnect your wallet and try again.");
+      setStatusStage("error");
+      return;
+    }
+    if (chainId !== POLYGON_AMOY_CHAIN_ID) {
+      setErrorMessage("Switch your wallet to Polygon Amoy (chain 80002) before submitting.");
+      setStatusStage("error");
+      return;
+    }
+    const batchId = searchBatchId.trim();
+    if (!batchId || !handoffLocation.trim()) {
+      setErrorMessage("Load a valid batch and enter the required location.");
+      setStatusStage("error");
+      return;
+    }
+    if (!isFinalDelivery && (!fromParty.trim() || !receivingPartyName.trim())) {
+      setErrorMessage("From party and receiving party are required for a custody handoff.");
+      setStatusStage("error");
+      return;
+    }
+    const numericQuantity = Number(quantityTransferred);
+    if (!isFinalDelivery && (!Number.isFinite(numericQuantity) || numericQuantity <= 0)) {
+      setErrorMessage("Enter a positive quantity for the custody handoff.");
+      setStatusStage("error");
+      return;
+    }
+
     setErrorMessage("");
+    setPendingActionType(isFinalDelivery ? "DELIVERY" : "HANDOFF");
     setStatusStage("wallet_pending");
 
     try {
-      const isFinalDelivery = handoffType === "Distributor to Market";
+      const [batch, approved, history, currentCustodian] = await Promise.all([
+        publicClient.readContract({
+          address: produceRegistryContract.address,
+          abi: produceRegistryContract.abi,
+          functionName: "getBatch",
+          args: [batchId],
+        }),
+        publicClient.readContract({
+          address: supplyChainLedgerContract.address,
+          abi: supplyChainLedgerContract.abi,
+          functionName: "isApprovedDistributor",
+          args: [address],
+        }),
+        publicClient.readContract({
+          address: supplyChainLedgerContract.address,
+          abi: supplyChainLedgerContract.abi,
+          functionName: "getHandoffHistory",
+          args: [batchId],
+        }),
+        publicClient.readContract({
+          address: supplyChainLedgerContract.address,
+          abi: supplyChainLedgerContract.abi,
+          functionName: "getCurrentCustodian",
+          args: [batchId],
+        }),
+      ]);
+      if (!approved) throw new Error("Not an approved distributor");
+      const onChainStatus = Number(batch.status);
+      if (onChainStatus === 3) throw new Error("This batch has already been delivered.");
+      if (onChainStatus === 4) throw new Error("A flagged batch cannot be distributed.");
+      if (isFinalDelivery && (onChainStatus !== 2 || history.length === 0)) {
+        throw new Error("Final delivery requires a batch that is already in transit with a confirmed handoff.");
+      }
+      if (isFinalDelivery && currentCustodian.toLowerCase() !== address.toLowerCase()) {
+        throw new Error("Only the batch's current on-chain custodian can record final delivery.");
+      }
+      if (!isFinalDelivery && ![1, 2].includes(onChainStatus)) {
+        throw new Error("This batch is not eligible for a custody handoff.");
+      }
+
       let hash: `0x${string}`;
 
       if (isFinalDelivery) {
-        // Call recordDelivery(batchId, location) on supplyChainLedgerContract for final delivery
+        await publicClient.simulateContract({
+          account: address,
+          address: supplyChainLedgerContract.address,
+          abi: supplyChainLedgerContract.abi,
+          functionName: "recordDelivery",
+          args: [batchId, handoffLocation.trim()],
+        });
         hash = await writeContractAsync({
           address: supplyChainLedgerContract.address,
           abi: supplyChainLedgerContract.abi,
           functionName: "recordDelivery",
           args: [
-            searchBatchId,
-            handoffLocation || "Location",
+            batchId,
+            handoffLocation.trim(),
           ],
         });
       } else {
-        // Call recordHandoff(batchId, fromParty, toParty, location, condition, transportMethod, quantityKg) for in-transit handoff
-        const quantityVal = BigInt(Math.round(parseFloat(quantityTransferred || "0")));
+        const quantityVal = BigInt(Math.round(numericQuantity));
+
+        await publicClient.simulateContract({
+          account: address,
+          address: supplyChainLedgerContract.address,
+          abi: supplyChainLedgerContract.abi,
+          functionName: "recordHandoff",
+          args: [
+            batchId,
+            fromParty.trim(),
+            receivingPartyName.trim(),
+            handoffLocation.trim(),
+            condition,
+            transportMethod,
+            quantityVal,
+          ],
+        });
 
         hash = await writeContractAsync({
           address: supplyChainLedgerContract.address,
           abi: supplyChainLedgerContract.abi,
           functionName: "recordHandoff",
           args: [
-            searchBatchId,
-            fromParty || "Warehouse",
-            receivingPartyName || "Distributor",
-            handoffLocation || "Location",
-            condition || "Good condition",
-            transportMethod || "Refrigerated truck",
+            batchId,
+            fromParty.trim(),
+            receivingPartyName.trim(),
+            handoffLocation.trim(),
+            condition,
+            transportMethod,
             quantityVal,
           ],
         });
       }
 
       setTxHash(hash);
+      window.localStorage.setItem(DISTRIBUTION_SYNC_BATCH_KEY, batchId);
+      window.localStorage.setItem(DISTRIBUTION_SYNC_TYPE_KEY, isFinalDelivery ? "DELIVERY" : "HANDOFF");
       setStatusStage("confirming_onchain");
     } catch (err: unknown) {
       console.error("Handoff/Delivery error:", err);
@@ -2125,6 +2357,8 @@ function HandoffTab() {
         message.includes("user rejected")
       ) {
         setErrorMessage("Transaction was rejected in your wallet.");
+      } else if (message.includes("already been delivered")) {
+        setErrorMessage("This batch is already delivered. No duplicate transaction was submitted.");
       } else {
         setErrorMessage(`Handoff/Delivery recording failed: ${message}`);
       }
@@ -2146,8 +2380,12 @@ function HandoffTab() {
         buttonColor="bg-accent-amber"
         value={searchBatchId}
         onChange={setSearchBatchId}
+        onLoad={handleLoadBatch}
+        isLoading={isLoadingBatch}
       />
-      <LoadedBatchCard batchId={searchBatchId} status="CERTIFIED" />
+      {loadedBatchStatus ? (
+        <LoadedBatchCard batchId={searchBatchId} status={loadedBatchStatus} />
+      ) : null}
 
       <section className="grid grid-cols-1 gap-6 px-8 xl:grid-cols-[1fr_300px]">
         <div className="flex flex-col gap-4 rounded-xl glass p-6">
@@ -2320,9 +2558,33 @@ function HandoffTab() {
             </div>
           ) : null}
 
+          {statusStage === "sync_pending" ? (
+            <div className="flex items-center gap-2 rounded-lg border border-accent-amber/30 bg-accent-amber/10 p-3 text-sm text-accent-amber" role="status" aria-live="polite">
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+              <span>Blockchain confirmed. Synchronizing the verified record with AgriTrust...</span>
+            </div>
+          ) : null}
+
+          {statusStage === "sync_failed" && errorMessage ? (
+            <div className="space-y-3 rounded-lg border border-accent-amber/30 bg-accent-amber/10 p-3 text-sm text-accent-amber" role="alert">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+              <button
+                className="min-h-11 rounded-lg border border-accent-amber/50 px-4 py-2 font-semibold hover:bg-accent-amber/10"
+                type="button"
+                onClick={retrySynchronization}
+              >
+                Retry Synchronization
+              </button>
+              <p className="text-xs text-agri-muted">This retries database synchronization only and never resubmits the blockchain transaction.</p>
+            </div>
+          ) : null}
+
           {statusStage === "error" && errorMessage ? (
-            <div className="rounded-lg border border-accent-red/30 bg-accent-red/10 p-3 text-sm text-accent-red flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 shrink-0" />
+            <div className="flex items-start gap-2 rounded-lg border border-accent-red/30 bg-accent-red/10 p-3 text-sm text-accent-red" role="alert">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <span>{errorMessage}</span>
             </div>
           ) : null}
@@ -2341,7 +2603,14 @@ function HandoffTab() {
               className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-accent-amber py-3 font-semibold text-white transition-shadow duration-300 hover:shadow-[0_0_15px_rgba(245,158,11,0.4)] disabled:opacity-50"
               type="button"
               onClick={handleRecordHandoff}
-              disabled={statusStage === "wallet_pending" || statusStage === "confirming_onchain" || statusStage === "success"}
+              disabled={
+                !loadedBatchStatus ||
+                statusStage === "wallet_pending" ||
+                statusStage === "confirming_onchain" ||
+                statusStage === "sync_pending" ||
+                statusStage === "sync_failed" ||
+                statusStage === "success"
+              }
             >
               {statusStage === "wallet_pending" ? (
                 <>
@@ -2352,6 +2621,11 @@ function HandoffTab() {
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Confirming transaction...
+                </>
+              ) : statusStage === "sync_pending" ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Synchronizing database...
                 </>
               ) : (
                 <>
@@ -2368,8 +2642,9 @@ function HandoffTab() {
             Why this matters
           </h3>
           <p className="mb-3 text-xs text-agri-muted">
-            Every handoff creates an immutable record of who had custody, where
-            the batch moved, and what condition it was in.
+            {isFinalDelivery
+              ? "Final delivery records the Distributor's market destination on-chain. It does not independently prove that a market recipient physically acknowledged receipt."
+              : "Every handoff creates an immutable record of who had custody, where the batch moved, and what condition it was in."}
           </p>
           <p className="mb-4 text-xs text-agri-muted">
             The consumer QR verify page auto-updates as each supply chain
@@ -2381,7 +2656,7 @@ function HandoffTab() {
               <div className="flex items-center gap-2">
                 <LinkIcon className="h-3 w-3 text-accent-amber" />
                 <p className="font-mono text-[10px] text-accent-amber/70">
-                  {txHash ? `${txHash.slice(0, 10)}...` : `${TX_HASHES.inspection.slice(0, 7)}...7c3e`}
+                  {txHash ? `${txHash.slice(0, 10)}...` : "Awaiting transaction"}
                 </p>
               </div>
             </div>

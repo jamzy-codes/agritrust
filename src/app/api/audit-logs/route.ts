@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { buildAuditLogPayload, normalizeAuditLogRecord } from "@/lib/data-model";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { apiAuthErrorResponse, requireApiProfile } from "@/lib/server/api-auth";
 
 export async function GET(request: NextRequest) {
   try {
+    await requireApiProfile(request, ["REGULATOR"]);
     const entityId = request.nextUrl.searchParams.get("entityId");
     const entityType = request.nextUrl.searchParams.get("entityType");
 
@@ -29,6 +31,8 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ auditLogs: data ?? [] });
   } catch (error) {
+    const authResponse = apiAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     const message = error instanceof Error ? error.message : "Unexpected error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -36,9 +40,10 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const profile = await requireApiProfile(request);
     const body = await request.json();
     const normalized = normalizeAuditLogRecord(body);
-    const actorId = normalized.actor_id;
+    const actorId = profile.id;
     const entityType = normalized.entity_type;
     const entityId = normalized.entity_id;
     const action = normalized.action;
@@ -66,6 +71,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ auditLog: data }, { status: 201 });
   } catch (error) {
+    const authResponse = apiAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     const message = error instanceof Error ? error.message : "Unexpected error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

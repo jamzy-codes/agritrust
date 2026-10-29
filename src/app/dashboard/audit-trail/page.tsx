@@ -37,7 +37,7 @@ export default function AuditTrailPage() {
       const [{ data: batches }, { data: inspections }, { data: handoffs }] = await Promise.all([
         supabase.from("batches").select("batch_id, registered_at, tx_hash, registered_by"),
         supabase.from("inspections").select("batch_id, inspected_at, tx_hash, inspector_id, certificate_issued"),
-        supabase.from("handoffs").select("batch_id, handed_off_at, tx_hash, distributor_id"),
+        supabase.from("handoffs").select("id, batch_id, handed_off_at, tx_hash, distributor_id, condition"),
       ]);
 
       const userIds = new Set<string>();
@@ -97,11 +97,14 @@ export default function AuditTrailPage() {
 
       handoffs?.forEach((handoff) => {
         const rawTimestamp = toSafeTimestamp(handoff.handed_off_at);
+        const isDelivery = handoff.condition === "Final market delivery recorded on-chain";
         combined.push({
-          id: `handoff-${handoff.batch_id}-${rawTimestamp}`,
+          id: `${isDelivery ? "delivery" : "handoff"}-${handoff.id}`,
           hash: handoff.tx_hash,
-          type: "HANDOFF",
-          typeTone: "bg-accent-amber/20 text-accent-amber border-accent-amber/30",
+          type: isDelivery ? "DELIVERY" : "HANDOFF",
+          typeTone: isDelivery
+            ? "bg-accent-green/20 text-accent-green border-accent-green/30"
+            : "bg-accent-amber/20 text-accent-amber border-accent-amber/30",
           batch: handoff.batch_id,
           actor: handoff.distributor_id ? userMap.get(handoff.distributor_id) || "Distributor" : "Distributor",
           timestamp: handoff.handed_off_at || "Pending timestamp",

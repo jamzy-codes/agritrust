@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
   AlertCircle,
   ExternalLink,
@@ -16,7 +17,8 @@ import {
 
 import BrandLogo from "@/components/brand/BrandLogo";
 import VerificationQr from "@/components/verification/VerificationQr";
-import { supabase } from "@/lib/supabase";
+import { isValidBatchId, normalizeBatchId } from "@/lib/batch-id";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function MiniTimeline({
   stages,
@@ -24,9 +26,9 @@ function MiniTimeline({
   stages: Array<{ label: string; date: string; complete: boolean }>;
 }) {
   return (
-    <div className="flex items-start justify-between gap-2">
+    <div className="grid grid-cols-1 gap-3 sm:flex sm:items-start sm:justify-between sm:gap-2">
       {stages.map((stage, index) => (
-        <div key={stage.label} className="flex flex-1 flex-col items-center">
+        <div key={stage.label} className="flex min-w-0 flex-1 items-center gap-3 rounded-lg bg-agri-raised/50 p-2 sm:flex-col sm:bg-transparent sm:p-0">
           <div
             className={`flex h-8 w-8 items-center justify-center rounded-full border-2 ${
               stage.complete
@@ -36,7 +38,7 @@ function MiniTimeline({
           >
             <span className="text-[10px] font-bold">{index + 1}</span>
           </div>
-          <div className="mt-2 text-center">
+          <div className="text-left sm:mt-2 sm:text-center">
             <p className="text-[11px] font-semibold text-agri-text">
               {stage.label}
             </p>
@@ -59,21 +61,58 @@ export default async function VerifyBatchPage({
 }: {
   params: Promise<{ batchId: string }>;
 }) {
-  const { batchId } = await params;
+  const { batchId: rawBatchId } = await params;
+  const batchId = normalizeBatchId(rawBatchId);
+  const hasValidFormat = isValidBatchId(batchId);
+
+  if (hasValidFormat && rawBatchId !== batchId) {
+    redirect(`/verify/${encodeURIComponent(batchId)}`);
+  }
 
   // 1. Fetch batch details from Supabase
-  const { data: batch } = await supabase
-    .from("batches")
-    .select("*")
-    .eq("batch_id", batchId)
-    .maybeSingle();
+  const batchLookup = hasValidFormat
+    ? await supabaseAdmin
+        .from("batches")
+        .select("batch_id, crop_type, farm_id, gmo_status, is_gmo_free, quantity_kg, registered_at, status, tx_hash")
+        .eq("batch_id", batchId)
+        .maybeSingle()
+    : { data: null, error: null };
+  const { data: batch, error: batchLookupError } = batchLookup;
+
+  if (batchLookupError) {
+    return (
+      <div className="min-h-screen bg-agri-base">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-agri-border px-4 py-4 sm:px-8">
+          <Link className="inline-flex min-h-10 items-center" href="/">
+            <BrandLogo size="sm" />
+          </Link>
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-agri-muted" />
+            <p className="text-sm text-agri-muted">Public Verification Portal</p>
+          </div>
+        </header>
+        <section className="flex flex-col items-center justify-center px-4 py-20 text-center sm:px-8 sm:py-24">
+          <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full border-4 border-accent-amber/30 bg-accent-amber/10 text-accent-amber">
+            <AlertCircle className="h-10 w-10" />
+          </div>
+          <h1 className="mb-2 text-3xl font-bold text-agri-text">Verification Temporarily Unavailable</h1>
+          <p className="mb-6 max-w-md text-sm text-agri-muted">
+            AgriTrust could not read the verification record. No result has been inferred. Please try again shortly.
+          </p>
+          <Link href="/verify" className="inline-flex min-h-11 items-center rounded-xl bg-accent-blue px-6 py-2.5 text-sm font-semibold text-white hover:bg-accent-blue/90">
+            Try another Batch ID
+          </Link>
+        </section>
+      </div>
+    );
+  }
 
   // If batch not found, render clean error state
   if (!batch) {
     return (
       <div className="min-h-screen bg-agri-base">
-        <header className="flex items-center justify-between border-b border-agri-border px-8 py-4">
-          <Link href="/">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-agri-border px-4 py-4 sm:px-8">
+          <Link className="inline-flex min-h-10 items-center" href="/">
             <BrandLogo size="sm" />
           </Link>
           <div className="flex items-center gap-2">
@@ -82,7 +121,7 @@ export default async function VerifyBatchPage({
           </div>
         </header>
 
-        <section className="flex flex-col items-center justify-center px-8 py-24 text-center">
+        <section className="flex flex-col items-center justify-center px-4 py-20 text-center sm:px-8 sm:py-24">
           <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full border-4 border-accent-red/30 bg-accent-red/10 text-accent-red">
             <AlertCircle className="h-10 w-10" />
           </div>
@@ -90,16 +129,20 @@ export default async function VerifyBatchPage({
             className="mb-2 text-3xl font-bold text-agri-text"
             style={{ fontFamily: "var(--font-outfit)" }}
           >
-            Batch Not Found
+            {hasValidFormat ? "Batch Not Found" : "Invalid Batch ID"}
           </h1>
           <p className="max-w-md text-sm text-agri-muted mb-6">
-            No produce batch matching ID <span className="font-mono font-bold text-agri-text">{batchId}</span> was found in the AgriTrust ledger database.
+            {hasValidFormat ? (
+              <>No produce batch matching ID <span className="font-mono font-bold text-agri-text">{batchId}</span> was found. Check the label and try again.</>
+            ) : (
+              <>The supplied Batch ID is not valid. AgriTrust Batch IDs use the format <span className="font-mono font-bold text-agri-text">AGT-1234</span>.</>
+            )}
           </p>
           <Link
-            href="/"
+            href="/verify"
             className="rounded-xl bg-accent-blue px-6 py-2.5 text-sm font-semibold text-white transition-all hover:bg-accent-blue/90"
           >
-            Return to Home
+            Try another Batch ID
           </Link>
         </section>
       </div>
@@ -108,24 +151,24 @@ export default async function VerifyBatchPage({
 
   // 2. Fetch farm details if farm_id exists
   const { data: farm } = batch.farm_id
-    ? await supabase
+    ? await supabaseAdmin
         .from("farms")
-        .select("*")
+        .select("farm_name, location, gps_coordinates")
         .eq("id", batch.farm_id)
         .maybeSingle()
     : { data: null };
 
   // 3. Fetch inspections for this batch
-  const { data: inspections } = await supabase
+  const { data: inspections } = await supabaseAdmin
     .from("inspections")
-    .select("*")
+    .select("inspected_at, certificate_issued, quality_grade, tx_hash")
     .eq("batch_id", batchId)
     .order("inspected_at", { ascending: true });
 
   // 4. Fetch handoffs for this batch
-  const { data: handoffs } = await supabase
+  const { data: handoffs } = await supabaseAdmin
     .from("handoffs")
-    .select("*")
+    .select("id, from_party, to_party, location, condition, transport_method, tx_hash, handed_off_at")
     .eq("batch_id", batchId)
     .order("handed_off_at", { ascending: true });
 
@@ -136,6 +179,13 @@ export default async function VerifyBatchPage({
   const latestHandoff = handoffs && handoffs.length > 0
     ? handoffs[handoffs.length - 1]
     : null;
+  const delivery = handoffs?.find(
+    (handoff) => handoff.condition === "Final market delivery recorded on-chain",
+  ) ?? null;
+  const custodyHandoffs = (handoffs ?? []).filter(
+    (handoff) => handoff.condition !== "Final market delivery recorded on-chain",
+  );
+  const latestCustodyHandoff = custodyHandoffs.at(-1) ?? null;
 
   // Format date helper
   const formatDate = (dateStr?: string | null) => {
@@ -155,14 +205,19 @@ export default async function VerifyBatchPage({
       complete: true,
     },
     {
-      label: "Inspection",
+      label: "Inspection & Certification",
       date: formatDate(latestInspection?.inspected_at),
       complete: Boolean(latestInspection),
     },
     {
-      label: "Handoff / Delivery",
-      date: formatDate(latestHandoff?.handed_off_at),
-      complete: Boolean(latestHandoff),
+      label: "Distribution",
+      date: formatDate(latestCustodyHandoff?.handed_off_at),
+      complete: Boolean(latestCustodyHandoff),
+    },
+    {
+      label: "Market Delivery",
+      date: formatDate(delivery?.handed_off_at),
+      complete: batch.status === "DELIVERED" && Boolean(delivery),
     },
   ];
 
@@ -180,23 +235,23 @@ export default async function VerifyBatchPage({
   const farmName = farm?.farm_name || "Registered Farm";
   const farmLocation = farm?.location || "Nigeria";
   const registeredDateStr = formatDate(batch.registered_at);
-  const primaryTxHash = latestInspection?.tx_hash || latestHandoff?.tx_hash || batch.tx_hash;
+  const primaryTxHash = latestHandoff?.tx_hash || latestInspection?.tx_hash || batch.tx_hash;
 
   return (
     <div className="min-h-screen bg-agri-base">
-      <header className="flex items-center justify-between border-b border-agri-border px-8 py-4">
-        <Link href="/">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-agri-border px-4 py-4 sm:px-8">
+      <Link className="inline-flex min-h-10 items-center" href="/">
           <BrandLogo size="sm" />
         </Link>
         <div className="flex items-center gap-2">
           <ShieldCheck className="h-4 w-4 text-accent-green" />
-          <p className="text-sm text-agri-muted">
+          <p className="hidden text-right text-xs text-agri-muted sm:block sm:max-w-none sm:text-sm">
             Verified public record. Powered by blockchain.
           </p>
         </div>
       </header>
 
-      <section className="px-8 py-12 text-center">
+      <section className="px-4 py-10 text-center sm:px-8 sm:py-12">
         <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full border-4 border-accent-green bg-accent-green/20 shadow-[0_0_40px_rgba(34,197,94,0.3)]">
           <ShieldCheck className="h-10 w-10 text-accent-green" />
         </div>
@@ -214,9 +269,9 @@ export default async function VerifyBatchPage({
         </p>
       </section>
 
-      <section className="mx-auto grid max-w-6xl grid-cols-1 gap-8 px-8 pb-12 lg:grid-cols-[1fr_360px]">
-        <div className="rounded-2xl border border-agri-border bg-agri-surface p-6">
-          <div className="mb-4 flex items-center justify-between">
+      <section className="mx-auto grid max-w-6xl grid-cols-1 gap-6 px-4 pb-12 sm:px-8 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-8">
+        <div className="min-w-0 rounded-2xl border border-agri-border bg-agri-surface p-4 sm:p-6">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Globe className="h-4 w-4 text-accent-green" />
               <span className="text-xs font-bold tracking-widest text-accent-green">
@@ -273,7 +328,36 @@ export default async function VerifyBatchPage({
           <p className="mb-4 text-xs font-bold tracking-wider uppercase text-agri-muted">
             SUPPLY CHAIN JOURNEY
           </p>
-          <MiniTimeline stages={timelineStages} />
+          <div className="max-w-full overflow-x-auto pb-2">
+            <MiniTimeline stages={timelineStages} />
+          </div>
+
+          {custodyHandoffs.length > 0 ? (
+            <div className="mt-5 space-y-2">
+              {custodyHandoffs.map((handoff, index) => (
+                <div key={handoff.id} className="rounded-lg border border-agri-border bg-agri-raised/50 p-3 text-xs">
+                  <p className="font-semibold text-agri-text">
+                    Handoff {index + 1}: {handoff.from_party || "Origin"} to {handoff.to_party || "Next custodian"}
+                  </p>
+                  <p className="mt-1 text-agri-muted">
+                    {handoff.location || "Location unavailable"} · {formatDate(handoff.handed_off_at)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {delivery ? (
+            <div className="mt-3 rounded-lg border border-accent-green/30 bg-accent-green/10 p-3 text-xs">
+              <p className="font-semibold text-accent-green">Final market delivery recorded</p>
+              <p className="mt-1 text-agri-muted">
+                {delivery.location || delivery.to_party} · {formatDate(delivery.handed_off_at)}
+              </p>
+              <p className="mt-1 text-agri-muted">
+                This is the Distributor&apos;s on-chain record; independent recipient acknowledgement is not supported by the current contract.
+              </p>
+            </div>
+          ) : null}
 
           <div className="my-4 border-t border-agri-border" />
 
@@ -319,7 +403,7 @@ export default async function VerifyBatchPage({
                       {primaryTxHash}
                     </p>
                     <a
-                      className="mt-1 inline-flex items-center gap-1 text-xs text-accent-blue hover:underline"
+                      className="mt-1 inline-flex min-h-10 items-center gap-1 text-xs text-accent-blue hover:underline"
                       href={`https://amoy.polygonscan.com/tx/${primaryTxHash}`}
                       target="_blank"
                       rel="noreferrer"
@@ -371,23 +455,23 @@ export default async function VerifyBatchPage({
         </div>
       </section>
 
-      <div className="flex items-center gap-2 border-t border-agri-border bg-agri-raised px-8 py-4">
+      <div className="flex items-start gap-2 border-t border-agri-border bg-agri-raised px-4 py-4 sm:px-8">
         <Info className="h-3.5 w-3.5 text-agri-muted" />
         <p className="text-xs text-agri-muted">
           Record created {registeredDateStr} · This record is immutable and permanently stored on the AgriTrust blockchain.
         </p>
       </div>
 
-      <footer className="flex items-center justify-between border-t border-agri-border px-8 py-6">
+      <footer className="flex flex-col items-start justify-between gap-4 border-t border-agri-border px-4 py-6 sm:flex-row sm:items-center sm:px-8">
         <div className="flex items-center gap-2">
-          <Link href="/">
+          <Link className="inline-flex h-11 w-11 shrink-0 items-center justify-center" href="/">
             <BrandLogo size="xs" showName={false} />
           </Link>
           <p className="text-sm text-agri-muted">
             Transparent produce. Trusted by nature.
           </p>
         </div>
-        <Link className="text-sm text-accent-blue" href="/register">
+        <Link className="inline-flex min-h-10 items-center text-sm text-accent-blue" href="/register">
           Are you a farmer? Register at agritrust.io ↗
         </Link>
       </footer>

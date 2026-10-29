@@ -49,11 +49,17 @@ export default function AlertsPage() {
           userProfile.role as UserRole,
           userData.user.id,
         );
-        if (markViewed) await markAlertsAsViewed(userData.user.id);
+        const readStateResult = markViewed
+          ? await markAlertsAsViewed(userData.user.id)
+          : null;
 
         if (isActive) {
           setAlerts(realAlerts);
-          setErrorMessage(null);
+          setErrorMessage(
+            readStateResult && !readStateResult.databasePersisted
+              ? "Notifications loaded, but read state is temporarily saved on this device only."
+              : null,
+          );
         }
       } catch (error) {
         logAlertsError("Error loading alerts in AlertsPage", error);
@@ -86,7 +92,7 @@ export default function AlertsPage() {
 
   return (
     <div className="pb-10">
-      <header className="mb-6 px-8 pt-8">
+      <header className="mb-6 px-4 pt-6 sm:px-8 sm:pt-8">
         <h1
           className="text-3xl font-bold text-agri-text"
           style={{ fontFamily: "var(--font-outfit)" }}
@@ -137,7 +143,7 @@ export default function AlertsPage() {
           <BellOff className="mx-auto mb-3 h-10 w-10 text-agri-muted" />
           <p className="text-sm font-medium text-agri-text">No alerts found</p>
           <p className="mt-1 text-xs text-agri-muted">
-            There are no {activeFilter !== "All" ? activeFilter.toLowerCase() : ""} alerts requiring your attention at this time.
+            There are no {activeFilter !== "All" ? activeFilter.toLowerCase() : ""} pending or historical notifications available.
           </p>
         </div>
       ) : filteredAlerts.length > 0 ? (
@@ -160,14 +166,14 @@ export default function AlertsPage() {
             return (
               <div
                 key={alert.id}
-                className="flex items-start gap-4 rounded-xl border border-agri-border bg-agri-surface p-4 transition-all hover:border-agri-border-focus"
+                className="flex flex-wrap items-start gap-3 rounded-xl border border-agri-border bg-agri-surface p-4 transition-all hover:border-agri-border-focus sm:flex-nowrap sm:gap-4"
               >
                 <div
                   className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${iconStyles}`}
                 >
                   <Icon className="h-5 w-5" />
                 </div>
-                <div className="flex-1">
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-agri-text">
                     {alert.title}
                   </p>
@@ -178,7 +184,7 @@ export default function AlertsPage() {
                 </div>
                 <Link
                   href={alert.href}
-                  className="shrink-0 text-xs font-medium text-accent-blue hover:underline"
+                  className="ml-13 shrink-0 text-xs font-medium text-accent-blue hover:underline sm:ml-0"
                 >
                   Review &rarr;
                 </Link>

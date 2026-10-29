@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { buildFarmPayload, normalizeFarmRecord } from "@/lib/data-model";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { apiAuthErrorResponse, requireApiProfile } from "@/lib/server/api-auth";
 
 export async function GET(request: NextRequest) {
   try {
+    const profile = await requireApiProfile(request);
     const ownerId = request.nextUrl.searchParams.get("ownerId");
 
     let query = supabaseAdmin
@@ -12,7 +14,9 @@ export async function GET(request: NextRequest) {
       .select("*")
       .order("created_at", { ascending: false });
 
-    if (ownerId) {
+    if (profile.role === "FARMER") {
+      query = query.eq("owner_id", profile.id);
+    } else if (ownerId) {
       query = query.eq("owner_id", ownerId);
     }
 
@@ -24,6 +28,8 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ farms: data ?? [] });
   } catch (error) {
+    const authResponse = apiAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     const message = error instanceof Error ? error.message : "Unexpected error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -31,11 +37,12 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const profile = await requireApiProfile(request, ["FARMER"]);
     const body = await request.json();
     const normalized = normalizeFarmRecord(body);
-    const ownerId = normalized.owner_id;
-    const farmName = normalized.farm_name ?? normalized.name;
-    const location = normalized.location ?? normalized.region;
+    const ownerId = profile.id;
+    const farmName = normalized.farm_name;
+    const location = normalized.location;
 
     if (!ownerId || !farmName || !location) {
       return NextResponse.json(
@@ -51,7 +58,6 @@ export async function POST(request: NextRequest) {
       owner_id: ownerId,
       farm_name: farmName,
       location,
-      region: location,
     };
 
     const { data, error } = await supabaseAdmin.from("farms").insert(payload).select().single();
@@ -62,6 +68,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ farm: data }, { status: 201 });
   } catch (error) {
+    const authResponse = apiAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     const message = error instanceof Error ? error.message : "Unexpected error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

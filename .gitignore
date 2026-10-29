@@ -52,3 +52,6 @@ next-env.d.ts
 
 # Dokugen
 /.dokugen/
+
+# AgriTrust Docs
+/AgriTrust_Complete_Project_Mastery_Guide.docx

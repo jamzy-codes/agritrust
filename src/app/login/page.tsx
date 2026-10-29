@@ -134,7 +134,7 @@ export default function LoginPage() {
                 onChange={(event) => updateField("password", event.target.value)}
               />
               <button
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-agri-muted hover:text-agri-text"
+                className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-md text-agri-muted hover:bg-agri-overlay hover:text-agri-text"
                 type="button"
                 onClick={() => setShowPassword((current) => !current)}
                 aria-label={showPassword ? "Hide password" : "Show password"}
@@ -144,7 +144,7 @@ export default function LoginPage() {
             </div>
             <div className="mt-1 flex justify-end">
               <button
-                className="text-xs text-accent-green"
+                className="inline-flex min-h-10 items-center text-xs text-accent-green"
                 type="button"
                 onClick={handlePasswordReset}
                 disabled={isResetting}
@@ -196,7 +196,7 @@ export default function LoginPage() {
 
         <p className="mt-4 text-center text-sm text-agri-muted">
           New to AgriTrust?{" "}
-          <Link className="text-accent-green" href="/register">
+          <Link className="inline-flex min-h-10 items-center text-accent-green" href="/register">
             Create account
           </Link>
         </p>
