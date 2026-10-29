@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { buildBatchPayload, normalizeBatchRecord } from "@/lib/data-model";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { apiAuthErrorResponse, requireApiProfile } from "@/lib/server/api-auth";
 
 export async function GET(request: NextRequest) {
   try {
+    const profile = await requireApiProfile(request);
     const farmId = request.nextUrl.searchParams.get("farmId");
     const status = request.nextUrl.searchParams.get("status");
 
@@ -12,6 +14,10 @@ export async function GET(request: NextRequest) {
       .from("batches")
       .select("*, farms(farm_name, location)")
       .order("registered_at", { ascending: false });
+
+    if (profile.role === "FARMER") {
+      query = query.eq("registered_by", profile.id);
+    }
 
     if (farmId) {
       query = query.eq("farm_id", farmId);
@@ -29,6 +35,8 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ batches: data ?? [] });
   } catch (error) {
+    const authResponse = apiAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     const message = error instanceof Error ? error.message : "Unexpected error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -36,11 +44,12 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const profile = await requireApiProfile(request, ["FARMER"]);
     const body = await request.json();
     const normalized = normalizeBatchRecord(body);
     const batchId = normalized.batch_id;
     const farmId = normalized.farm_id;
-    const registeredBy = normalized.registered_by;
+    const registeredBy = profile.id;
 
     if (!batchId || !farmId || !registeredBy) {
       return NextResponse.json(
@@ -70,6 +79,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ batch: data }, { status: 201 });
   } catch (error) {
+    const authResponse = apiAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     const message = error instanceof Error ? error.message : "Unexpected error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

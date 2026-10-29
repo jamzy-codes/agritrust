@@ -170,7 +170,7 @@
   .landing .landing-nav-links { display: none; }
   .landing .landing-nav > .landing-button-nav { margin-left: auto; }
   .landing .landing-mobile-menu { display: block; }
-  .landing .landing-mobile-menu summary { display: flex; align-items: center; justify-content: center; gap: 7px; min-width: 36px; min-height: 36px; cursor: pointer; font-size: 12px; list-style: none; }
+  .landing .landing-mobile-menu summary { display: flex; align-items: center; justify-content: center; gap: 7px; min-width: 40px; min-height: 40px; cursor: pointer; font-size: 12px; list-style: none; }
   .landing .landing-mobile-menu summary::-webkit-details-marker { display: none; }
   .landing .landing-menu-bars { width: 18px; height: 12px; border-block: 1px solid #c6d1db; position: relative; }
   .landing .landing-menu-bars::before { content: ""; position: absolute; top: 5px; left: 0; width: 18px; height: 1px; background: #c6d1db; }
@@ -209,7 +209,7 @@
   .landing { --landing-gutter: 16px; }
   .landing .landing-nav { padding: 8px 10px; gap: 9px; }
   .landing .landing-nav .text-xl { font-size: 18px; }
-  .landing .landing-nav > .landing-button-nav { font-size: 11px; padding-inline: 10px; min-height: 36px; }
+  .landing .landing-nav > .landing-button-nav { font-size: 11px; padding-inline: 10px; min-height: 40px; }
   .landing .landing-mobile-menu summary > span:last-child { display: none; }
   .landing .landing-hero { padding-top: calc(var(--landing-nav-clearance) + 33px); }
   .landing h1 { font-size: clamp(32px, 9.6vw, 42px); letter-spacing: -.7px; line-height: 1.12; }
@@ -265,7 +265,9 @@
   .landing .landing-footer { padding-top: 28px; }
   .landing .landing-footer-top { flex-direction: column; gap: 25px; }
   .landing .landing-footer-links { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px 35px; width: 100%; }
-  .landing .landing-footer-links a { font-size: 14px; }
+  .landing .landing-footer-links a { display: inline-flex; min-height: 40px; align-items: center; font-size: 14px; }
+
+  .landing .landing-text-link { min-height: 40px; }
   .landing .landing-footer-bottom { flex-direction: column; gap: 10px; margin-top: 30px; font-size: 11px; }
 }
 @media (prefers-reduced-motion: reduce) {

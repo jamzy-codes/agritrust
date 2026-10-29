@@ -314,7 +314,7 @@ export default function SettingsPage() {
         </p>
       </header>
 
-      <div className="mt-6 grid grid-cols-[240px_1fr] gap-8 px-8">
+      <div className="mt-6 grid grid-cols-1 gap-6 px-8 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-8">
         <aside className="sticky top-24 h-fit rounded-xl border border-agri-border bg-agri-surface p-2">
           <nav className="flex flex-col gap-1">
             {navItems.map(({ key, icon: Icon, label }) => {
@@ -376,7 +376,7 @@ export default function SettingsPage() {
 
                 {/* FARMER Profile Fields */}
                 {role === "FARMER" && (
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="mb-1.5 block text-xs text-agri-muted">
                         Farm name
@@ -538,7 +538,7 @@ export default function SettingsPage() {
 
                 {/* INSPECTOR & DISTRIBUTOR Profile Fields */}
                 {(role === "INSPECTOR" || role === "DISTRIBUTOR") && (
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="mb-1.5 block text-xs text-agri-muted">
                         Full Name
@@ -584,7 +584,7 @@ export default function SettingsPage() {
 
                 {/* REGULATOR Profile Fields */}
                 {role === "REGULATOR" && (
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="mb-1.5 block text-xs text-agri-muted">
                         Full Name
@@ -762,7 +762,7 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
                     <label className="mb-1.5 block text-xs text-agri-muted">
                       Account Email Address

@@ -28,6 +28,11 @@ export interface MarkAlertsViewedResult {
   localPersisted: boolean;
 }
 
+export interface AlertReadStateResult {
+  lastViewedAt: string | null;
+  databaseAuthoritative: boolean;
+}
+
 const ERROR_LOG_WINDOW_MS = 60_000;
 const recentErrorLogs = new Map<string, number>();
 
@@ -200,14 +205,14 @@ export async function fetchRealAlerts(userRole?: UserRole, userId?: string): Pro
       }
     }
 
-    // 3. Batches Ready for Handoff (status = 'INSPECTED')
+    // 3. Certified batches ready for their first distribution handoff.
     // Visible to DISTRIBUTOR and REGULATOR network-wide.
     // Hidden from FARMER and INSPECTOR.
     if (!userRole || userRole === "DISTRIBUTOR" || userRole === "REGULATOR") {
       const { data: readyBatches, error: readyError } = await supabase
         .from("batches")
         .select("batch_id, crop_type, quantity_kg, registered_at")
-        .eq("status", "INSPECTED")
+        .eq("status", "CERTIFIED")
         .order("registered_at", { ascending: false });
 
       if (readyError) {
@@ -277,29 +282,188 @@ export async function fetchRealAlerts(userRole?: UserRole, userId?: string): Pro
       }
     }
 
-    // Status updates for the signed-in farmer's own batches.
+    // Lifecycle history uses the real inspection and custody timestamps rather
+    // than the batch registration timestamp.
     if (userRole === "FARMER" && effectiveUserId) {
       const { data: farmerBatches, error: farmerBatchError } = await supabase
         .from("batches")
-        .select("batch_id, crop_type, status, registered_at")
+        .select("batch_id, crop_type")
         .eq("registered_by", effectiveUserId)
-        .in("status", ["INSPECTED", "CERTIFIED", "IN_TRANSIT", "DELIVERED"])
         .order("registered_at", { ascending: false });
 
       if (farmerBatchError) {
         throw queryError("fetch farmer batch updates", "public.batches", farmerBatchError);
       }
 
-      for (const batch of farmerBatches ?? []) {
-        const statusLabel = String(batch.status).toLowerCase().replaceAll("_", " ");
+      const batchIds = (farmerBatches ?? []).map((batch) => batch.batch_id);
+      if (batchIds.length > 0) {
+        const [{ data: inspections, error: inspectionError }, { data: handoffs, error: handoffError }] =
+          await Promise.all([
+            supabase
+              .from("inspections")
+              .select("id, batch_id, certificate_issued, inspected_at")
+              .in("batch_id", batchIds)
+              .order("inspected_at", { ascending: false }),
+            supabase
+              .from("handoffs")
+              .select("id, batch_id, to_party, location, condition, handed_off_at")
+              .in("batch_id", batchIds)
+              .order("handed_off_at", { ascending: false }),
+          ]);
+        if (inspectionError) {
+          throw queryError("fetch farmer inspection history", "public.inspections", inspectionError);
+        }
+        if (handoffError) {
+          throw queryError("fetch farmer custody history", "public.handoffs", handoffError);
+        }
+
+        for (const inspection of inspections ?? []) {
+          alerts.push({
+            id: `farmer-inspection-${inspection.id}`,
+            title: `Inspection completed for batch ${inspection.batch_id}`,
+            description: inspection.certificate_issued
+              ? "The inspection passed and a biosafety certificate was issued."
+              : "The batch inspection was recorded.",
+            time: formatRelativeTime(inspection.inspected_at),
+            rawTime: inspection.inspected_at,
+            href: `/dashboard/trace/${inspection.batch_id}`,
+            type: "info",
+          });
+        }
+        for (const handoff of handoffs ?? []) {
+          const delivered = handoff.condition === "Final market delivery recorded on-chain";
+          alerts.push({
+            id: `farmer-${delivered ? "delivery" : "handoff"}-${handoff.id}`,
+            title: delivered
+              ? `Final market delivery recorded for ${handoff.batch_id}`
+              : `Handoff recorded for batch ${handoff.batch_id}`,
+            description: delivered
+              ? `The Distributor recorded delivery at ${handoff.location || handoff.to_party || "the market"}.`
+              : `The batch is in transit to ${handoff.to_party || handoff.location || "the next custodian"}.`,
+            time: formatRelativeTime(handoff.handed_off_at),
+            rawTime: handoff.handed_off_at,
+            href: `/dashboard/trace/${handoff.batch_id}`,
+            type: "info",
+          });
+        }
+      }
+    }
+
+    if (userRole === "INSPECTOR" && effectiveUserId) {
+      const { data: inspections, error } = await supabase
+        .from("inspections")
+        .select("id, batch_id, certificate_issued, inspected_at")
+        .eq("inspector_id", effectiveUserId)
+        .order("inspected_at", { ascending: false });
+      if (error) throw queryError("fetch Inspector activity", "public.inspections", error);
+      for (const inspection of inspections ?? []) {
         alerts.push({
-          id: `farmer-status-${batch.batch_id}-${batch.status}`,
-          title: `Batch ${batch.batch_id} is now ${statusLabel}`,
-          description: `Your ${batch.crop_type} batch has a new supply-chain status.`,
-          time: formatRelativeTime(batch.registered_at),
-          rawTime: batch.registered_at,
-          href: `/dashboard/trace/${batch.batch_id}`,
-          type: batch.status === "DELIVERED" ? "info" : "warning",
+          id: `inspector-activity-${inspection.id}`,
+          title: inspection.certificate_issued
+            ? `Certificate issued for ${inspection.batch_id}`
+            : `Inspection recorded for ${inspection.batch_id}`,
+          description: "Your verified inspection record is available in the batch history.",
+          time: formatRelativeTime(inspection.inspected_at),
+          rawTime: inspection.inspected_at,
+          href: `/dashboard/trace/${inspection.batch_id}`,
+          type: "info",
+        });
+      }
+    }
+
+    if (userRole === "DISTRIBUTOR" && effectiveUserId) {
+      const { data: custodyEvents, error: custodyError } = await supabase
+        .from("handoffs")
+        .select("id, batch_id, to_party, location, condition, handed_off_at")
+        .eq("distributor_id", effectiveUserId)
+        .order("handed_off_at", { ascending: false });
+      if (custodyError) {
+        throw queryError("fetch Distributor custody history", "public.handoffs", custodyError);
+      }
+      const inTransitBatchIds = [...new Set(
+        (custodyEvents ?? [])
+          .filter((event) => event.condition !== "Final market delivery recorded on-chain")
+          .map((event) => event.batch_id),
+      )];
+      let stillInTransit = new Set<string>();
+      if (inTransitBatchIds.length > 0) {
+        const { data: activeBatches, error: activeError } = await supabase
+          .from("batches")
+          .select("batch_id")
+          .in("batch_id", inTransitBatchIds)
+          .eq("status", "IN_TRANSIT");
+        if (activeError) {
+          throw queryError("fetch pending delivery tasks", "public.batches", activeError);
+        }
+        stillInTransit = new Set((activeBatches ?? []).map((batch) => batch.batch_id));
+      }
+      for (const event of custodyEvents ?? []) {
+        const delivered = event.condition === "Final market delivery recorded on-chain";
+        alerts.push({
+          id: `distributor-${delivered ? "delivery" : "handoff"}-${event.id}`,
+          title: delivered
+            ? `Final delivery synchronized for ${event.batch_id}`
+            : `Custody handoff synchronized for ${event.batch_id}`,
+          description: delivered
+            ? `Delivery was recorded at ${event.location || event.to_party || "the market"}.`
+            : stillInTransit.has(event.batch_id)
+              ? `Delivery remains pending for the batch sent to ${event.to_party || "the next custodian"}.`
+              : `Custody was recorded to ${event.to_party || event.location || "the next custodian"}.`,
+          time: formatRelativeTime(event.handed_off_at),
+          rawTime: event.handed_off_at,
+          href: `/dashboard/trace/${event.batch_id}`,
+          type: stillInTransit.has(event.batch_id) ? "warning" : "info",
+        });
+      }
+    }
+
+    if (userRole === "REGULATOR") {
+      const [{ data: inspections, error: inspectionError }, { data: custodyEvents, error: custodyError }] =
+        await Promise.all([
+          supabase
+            .from("inspections")
+            .select("id, batch_id, certificate_issued, inspected_at")
+            .order("inspected_at", { ascending: false })
+            .limit(50),
+          supabase
+            .from("handoffs")
+            .select("id, batch_id, to_party, location, condition, handed_off_at")
+            .order("handed_off_at", { ascending: false })
+            .limit(50),
+        ]);
+      if (inspectionError) {
+        throw queryError("fetch Regulator inspection activity", "public.inspections", inspectionError);
+      }
+      if (custodyError) {
+        throw queryError("fetch Regulator supply-chain activity", "public.handoffs", custodyError);
+      }
+      for (const inspection of inspections ?? []) {
+        alerts.push({
+          id: `regulator-inspection-${inspection.id}`,
+          title: inspection.certificate_issued
+            ? `Certificate issued for ${inspection.batch_id}`
+            : `Inspection recorded for ${inspection.batch_id}`,
+          description: "A verified biosafety event was added to the network history.",
+          time: formatRelativeTime(inspection.inspected_at),
+          rawTime: inspection.inspected_at,
+          href: `/dashboard/trace/${inspection.batch_id}`,
+          type: "info",
+        });
+      }
+      for (const event of custodyEvents ?? []) {
+        const delivered = event.condition === "Final market delivery recorded on-chain";
+        alerts.push({
+          id: `regulator-${delivered ? "delivery" : "handoff"}-${event.id}`,
+          title: delivered
+            ? `Final market delivery recorded for ${event.batch_id}`
+            : `Supply-chain handoff recorded for ${event.batch_id}`,
+          description: delivered
+            ? `Delivery destination: ${event.location || event.to_party || "Market"}.`
+            : `Custody destination: ${event.to_party || event.location || "Next custodian"}.`,
+          time: formatRelativeTime(event.handed_off_at),
+          rawTime: event.handed_off_at,
+          href: `/dashboard/trace/${event.batch_id}`,
+          type: "info",
         });
       }
     }
@@ -327,50 +491,68 @@ function localReadState(userId: string): string | null {
   }
 }
 
-export async function getLastViewedAlertsAt(userId: string): Promise<string | null> {
+function writeLocalReadState(userId: string, viewedAt: string | null): boolean {
+  if (typeof window === "undefined") return false;
+
+  try {
+    if (viewedAt) window.localStorage.setItem(readStateKey(userId), viewedAt);
+    else window.localStorage.removeItem(readStateKey(userId));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function getAlertsReadState(userId: string): Promise<AlertReadStateResult> {
   try {
     const { data, error } = await supabase.rpc("get_my_last_viewed_alerts_at");
 
     if (error) {
       logAlertsError("Alert read state database lookup failed; using local storage", error);
-    } else if (typeof data === "string") {
-      return data;
+    } else {
+      const lastViewedAt = typeof data === "string" ? data : null;
+      // A successful database response is authoritative, including null. Clear
+      // stale local state instead of allowing it to override a newer DB value.
+      writeLocalReadState(userId, lastViewedAt);
+      return { lastViewedAt, databaseAuthoritative: true };
     }
   } catch (error) {
     logAlertsError("Alert read state database lookup failed; using local storage", error);
   }
 
-  return localReadState(userId);
+  return {
+    lastViewedAt: localReadState(userId),
+    databaseAuthoritative: false,
+  };
 }
 
 export async function markAlertsAsViewed(
   userId: string,
 ): Promise<MarkAlertsViewedResult> {
-  const viewedAt = new Date().toISOString();
-  let localPersisted = false;
-
-  if (typeof window !== "undefined") {
-    try {
-      window.localStorage.setItem(readStateKey(userId), viewedAt);
-      localPersisted = true;
-    } catch {
-      localPersisted = false;
-    }
-  }
-
   try {
-    const { error } = await supabase.rpc("mark_my_alerts_viewed", {
-      p_viewed_at: viewedAt,
-    });
+    const { data, error } = await supabase.rpc("mark_my_alerts_viewed");
 
     if (error) {
       logAlertsError("Alert read state database update failed", error);
-      return { databasePersisted: false, localPersisted };
+    } else if (typeof data === "string") {
+      return {
+        databasePersisted: true,
+        localPersisted: writeLocalReadState(userId, data),
+      };
+    } else {
+      logAlertsError(
+        "Alert read state database update returned no timestamp",
+        new Error("mark_my_alerts_viewed returned no timestamp"),
+      );
     }
-
-    return { databasePersisted: true, localPersisted };
   } catch (error) {
     logAlertsError("Alert read state database update failed", error);
-    return { databasePersisted: false, localPersisted };
   }
+
+  // The fallback is deliberately written only after the authoritative database
+  // update fails. A later successful DB read will overwrite or clear it.
+  return {
+    databasePersisted: false,
+    localPersisted: writeLocalReadState(userId, new Date().toISOString()),
+  };
 }

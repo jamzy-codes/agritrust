@@ -1,7 +1,7 @@
 -- AgriTrust notification read-state migration
 --
 -- Alert content remains protected by the existing RLS policies on public.batches,
--- public.credentials, and public.users. The two SECURITY DEFINER functions below
+-- public.inspections, public.handoffs, public.credentials, and public.users. The two SECURITY DEFINER functions below
 -- expose only the signed-in user's notification timestamp. They do not grant
 -- general SELECT or UPDATE access to public.users.
 
@@ -20,14 +20,16 @@ STABLE
 SECURITY DEFINER
 SET search_path = ''
 AS $$
-  SELECT users.last_viewed_alerts_at
+  SELECT public.users.last_viewed_alerts_at
   FROM public.users
-  WHERE users.id = auth.uid()
+  WHERE public.users.id = auth.uid()
 $$;
 
-CREATE OR REPLACE FUNCTION public.mark_my_alerts_viewed(
-  p_viewed_at TIMESTAMPTZ DEFAULT NOW()
-)
+-- Remove the earlier client-timestamp signature if this migration is reapplied
+-- after a preview version. The database clock is authoritative.
+DROP FUNCTION IF EXISTS public.mark_my_alerts_viewed(TIMESTAMPTZ);
+
+CREATE OR REPLACE FUNCTION public.mark_my_alerts_viewed()
 RETURNS TIMESTAMPTZ
 LANGUAGE plpgsql
 VOLATILE
@@ -44,7 +46,7 @@ BEGIN
   END IF;
 
   UPDATE public.users
-  SET last_viewed_alerts_at = p_viewed_at
+  SET last_viewed_alerts_at = clock_timestamp()
   WHERE id = v_user_id
   RETURNING last_viewed_alerts_at INTO v_saved_at;
 
@@ -61,9 +63,9 @@ REVOKE ALL ON FUNCTION public.get_my_last_viewed_alerts_at() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.get_my_last_viewed_alerts_at() FROM anon;
 GRANT EXECUTE ON FUNCTION public.get_my_last_viewed_alerts_at() TO authenticated;
 
-REVOKE ALL ON FUNCTION public.mark_my_alerts_viewed(TIMESTAMPTZ) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.mark_my_alerts_viewed(TIMESTAMPTZ) FROM anon;
-GRANT EXECUTE ON FUNCTION public.mark_my_alerts_viewed(TIMESTAMPTZ) TO authenticated;
+REVOKE ALL ON FUNCTION public.mark_my_alerts_viewed() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.mark_my_alerts_viewed() FROM anon;
+GRANT EXECUTE ON FUNCTION public.mark_my_alerts_viewed() TO authenticated;
 
 COMMIT;
 
@@ -73,18 +75,20 @@ COMMIT;
 -- against these required permissions:
 --   FARMER: SELECT only own batches for farmer-specific alerts.
 --   INSPECTOR: SELECT REGISTERED batches required for inspection work.
---   DISTRIBUTOR: SELECT INSPECTED batches required for handoff.
+--   DISTRIBUTOR: SELECT CERTIFIED batches required for handoff, plus only relevant
+--                custody records required for history and pending delivery tasks.
 --   REGULATOR: SELECT relevant batches, pending credentials, and applicant users.
 -- No alert operation requires INSERT, DELETE, or a general users-table UPDATE.
 
 SELECT table_name, column_name, data_type
 FROM information_schema.columns
 WHERE table_schema = 'public'
-  AND table_name IN ('users', 'batches', 'credentials')
+  AND table_name IN ('users', 'batches', 'inspections', 'handoffs', 'credentials')
   AND column_name IN (
     'id', 'full_name', 'email', 'role', 'last_viewed_alerts_at',
     'batch_id', 'crop_type', 'quantity_kg', 'gmo_status', 'status',
-    'registered_at', 'registered_by',
+    'registered_at', 'registered_by', 'inspected_at', 'inspector_id',
+    'handed_off_at', 'distributor_id', 'condition',
     'user_id', 'license_number', 'certifying_body', 'submitted_at'
   )
 ORDER BY table_name, ordinal_position;
@@ -110,5 +114,5 @@ WHERE tc.constraint_type = 'FOREIGN KEY'
 SELECT schemaname, tablename, policyname, roles, cmd, qual, with_check
 FROM pg_policies
 WHERE schemaname = 'public'
-  AND tablename IN ('users', 'batches', 'credentials')
+  AND tablename IN ('users', 'batches', 'inspections', 'handoffs', 'credentials')
 ORDER BY tablename, cmd, policyname;

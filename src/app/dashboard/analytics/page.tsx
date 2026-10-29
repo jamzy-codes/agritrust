@@ -122,6 +122,7 @@ function StatCard({
 function FarmerAnalytics() {
   const [selectedRange, setSelectedRange] = useState("Last 6 months");
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [farmerData, setFarmerData] = useState({
     totalBatches: 0,
     certifiedBatches: 0,
@@ -146,15 +147,34 @@ function FarmerAnalytics() {
 
   useEffect(() => {
     async function loadFarmerAnalytics() {
+      setIsLoading(true);
+      setLoadError(null);
       try {
-        const { data: userData } = await supabase.auth.getUser();
-        if (!userData.user) return;
+        const { data: userData, error: userError } = await supabase.auth.getUser();
+        if (userError || !userData.user) {
+          throw userError ?? new Error("A signed-in user is required.");
+        }
 
-        const { data: batches, error: batchesError } = await supabase
+        const now = new Date();
+        const rangeStart = new Date(now);
+        if (selectedRange === "Last 3 months") {
+          rangeStart.setMonth(rangeStart.getMonth() - 3);
+        } else if (selectedRange === "Last 6 months") {
+          rangeStart.setMonth(rangeStart.getMonth() - 6);
+        } else if (selectedRange === "Last 12 months") {
+          rangeStart.setMonth(rangeStart.getMonth() - 12);
+        } else {
+          rangeStart.setMonth(0, 1);
+          rangeStart.setHours(0, 0, 0, 0);
+        }
+
+        const batchesQuery = supabase
           .from("batches")
           .select("batch_id, crop_type, quantity_kg, status, registered_at")
           .eq("registered_by", userData.user.id)
+          .gte("registered_at", rangeStart.toISOString())
           .order("registered_at", { ascending: false });
+        const { data: batches, error: batchesError } = await batchesQuery;
         if (batchesError) throw batchesError;
 
         const batchIds = (batches || []).map((batch) => batch.batch_id);
@@ -183,13 +203,16 @@ function FarmerAnalytics() {
           text: string;
           date: string;
         }> = (batches || []).slice(0, 5).map((batch) => {
-          const state: "green" | "amber" = batch.status === "CERTIFIED" ? "green" : "amber";
+          const inspection = certificationByBatch.get(batch.batch_id);
+          const state: "green" | "amber" = inspection ? "green" : "amber";
 
           return {
             batch_id: batch.batch_id,
             state,
-            text: batch.status === "CERTIFIED" ? "Certification issued" : "Batch registered",
-            date: batch.registered_at ? new Date(batch.registered_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "Recent",
+            text: inspection ? "Certification issued" : "Batch registered",
+            date: (inspection?.inspected_at || batch.registered_at)
+              ? new Date(inspection?.inspected_at || batch.registered_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+              : "Date unavailable",
           };
         });
 
@@ -215,71 +238,71 @@ function FarmerAnalytics() {
           timeline,
         });
       } catch (error) {
-        console.error("Error loading farmer analytics:", error);
+        const value = typeof error === "object" && error ? error as Record<string, unknown> : {};
+        const message = typeof value.message === "string" ? value.message : error instanceof Error ? error.message : "Unknown farmer analytics query error";
+        const code = typeof value.code === "string" ? value.code : null;
+        console.warn("[AgriTrust Analytics] Farmer query failed", {
+          message, code,
+          details: typeof value.details === "string" ? value.details : null,
+          hint: typeof value.hint === "string" ? value.hint : null,
+        });
+        setLoadError(code ? message + " [" + code + "]" : message);
       } finally {
         setIsLoading(false);
       }
     }
 
-    loadFarmerAnalytics();
-  }, []);
+    void loadFarmerAnalytics();
+  }, [selectedRange]);
 
   const barData = useMemo(() => {
-    const monthOrder = ["Dec", "Jan", "Feb", "Mar", "Apr", "May"];
-    const currentMonth = new Date();
-
-    const monthlyMap = new Map(
-      monthOrder.map((month, index) => {
-        const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - (monthOrder.length - 1 - index), 1);
-        return [month, { month, certified: 0, pending: 0, date }];
-      }),
-    );
-
-    const batchesByMonth = new Map<string, { certified: number; pending: number }>();
-
-    for (const batch of (farmerData?.batches ?? [])) {
-      const safeDate = batch.registered_at ? new Date(batch.registered_at) : new Date("2024-01-01T00:00:00.000Z");
-      const monthLabel = safeDate.toLocaleString("en-US", { month: "short" });
-      const existing = batchesByMonth.get(monthLabel) ?? { certified: 0, pending: 0 };
-      if (batch.status === "CERTIFIED" || batch.status === "INSPECTED") {
-        existing.certified += 1;
-      } else {
-        existing.pending += 1;
-      }
-      batchesByMonth.set(monthLabel, existing);
-    }
-
-    return monthOrder.map((month) => {
-      const aggregate = batchesByMonth.get(month) ?? { certified: 0, pending: 0 };
-      return { month, certified: aggregate.certified, pending: aggregate.pending };
+    const now = new Date();
+    const monthCount = selectedRange === "Last 3 months"
+      ? 3
+      : selectedRange === "Last 6 months"
+        ? 6
+        : selectedRange === "Last 12 months"
+          ? 12
+          : now.getMonth() + 1;
+    const months = Array.from({ length: monthCount }, (_, index) => {
+      const date = new Date(now.getFullYear(), now.getMonth() - (monthCount - 1 - index), 1);
+      return {
+        key: date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0"),
+        month: date.toLocaleString("en-US", { month: "short", year: monthCount > 6 ? "2-digit" : undefined }),
+        certified: 0,
+        pending: 0,
+      };
     });
-  }, [farmerData]);
+    const byKey = new Map(months.map((item) => [item.key, item]));
+    for (const batch of farmerData.batches) {
+      if (!batch.registered_at) continue;
+      const date = new Date(batch.registered_at);
+      if (!Number.isFinite(date.getTime())) continue;
+      const key = date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0");
+      const item = byKey.get(key);
+      if (!item) continue;
+      if (batch.inspected_at) item.certified += 1;
+      else item.pending += 1;
+    }
+    return months;
+  }, [farmerData.batches, selectedRange]);
 
   const pieData = useMemo(() => {
     const cropTotals = new Map<string, number>();
-
     for (const batch of farmerData.batches) {
       const crop = batch.crop_type || "Other";
       cropTotals.set(crop, (cropTotals.get(crop) ?? 0) + Number(batch.quantity_kg || 0));
     }
-
-    const entries = [...cropTotals.entries()]
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 4)
+    const total = [...cropTotals.values()].reduce((sum, value) => sum + value, 0);
+    if (total <= 0) return [];
+    return [...cropTotals.entries()]
+      .sort(([, first], [, second]) => second - first)
       .map(([name, value], index) => ({
         name,
-        value: Math.max(1, Math.round((value / (Array.from(cropTotals.values()).reduce((sum, current) => sum + current, 0) || 1)) * 100)),
+        value: Number(((value / total) * 100).toFixed(1)),
         color: ["#3B82F6", "#22C55E", "#8B5CF6", "#6B6B80"][index % 4],
       }));
-
-    const totalValue = entries.reduce((sum, entry) => sum + entry.value, 0);
-    if (totalValue < 100 && entries.length > 0) {
-      entries[entries.length - 1].value += 100 - totalValue;
-    }
-
-    return entries.length ? entries : [{ name: "No data", value: 100, color: "#6B6B80" }];
-  }, [farmerData]);
-
+  }, [farmerData.batches]);
 
 
   const farmerStats: StatCardProps[] = [
@@ -323,7 +346,7 @@ function FarmerAnalytics() {
       value: isLoading
         ? "-"
         : farmerData.averageCertificationDays === null
-          ? "—"
+          ? "N/A"
           : `${farmerData.averageCertificationDays.toFixed(1)} days`,
       label: "Avg. time to certification",
       trend: "Current records",
@@ -366,6 +389,12 @@ function FarmerAnalytics() {
       </header>
 
 
+
+      {loadError ? (
+        <div className="mx-8 mb-6 rounded-xl border border-accent-red/30 bg-accent-red/10 px-4 py-3 text-sm text-accent-red">
+          Analytics could not be loaded: {loadError}
+        </div>
+      ) : null}
 
       <section className="mb-8 grid grid-cols-1 gap-4 px-8 md:grid-cols-2 xl:grid-cols-4">
 
@@ -581,7 +610,7 @@ function FarmerAnalytics() {
 
 
 
-      <section className="mx-8 overflow-hidden rounded-xl glass">
+      <section className="mx-8 overflow-x-auto rounded-xl glass">
 
         <table className="min-w-full">
 
@@ -698,6 +727,7 @@ function RegulatorAnalytics() {
 
   const [activeRange, setActiveRange] = useState("30 days");
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [regulatorData, setRegulatorData] = useState({
     activeFarms: 0,
     complianceRate: 0,
@@ -712,130 +742,228 @@ function RegulatorAnalytics() {
 
   useEffect(() => {
     async function loadRegulatorAnalytics() {
+      setIsLoading(true);
+      setLoadError(null);
       try {
-        const [farmsResult, batchesResult, certifiedResult, flagsResult, auditResult, inspectionsResult] = await Promise.all([
-          supabase.from("farms").select("id, region", { count: "exact" }),
-          supabase.from("batches").select("id, crop_type, status, registered_at, farm_id", { count: "exact" }),
-          supabase.from("batches").select("id", { count: "exact", head: true }).eq("status", "CERTIFIED"),
-          supabase.from("batches").select("id", { count: "exact", head: true }).eq("status", "FLAGGED"),
-          supabase.from("audit_logs").select("id", { count: "exact", head: true }),
-          supabase.from("inspections").select("id, batch_id, inspector_id, created_at, passed"),
+        const days = activeRange === "7 days"
+          ? 7
+          : activeRange === "30 days"
+            ? 30
+            : activeRange === "90 days"
+              ? 90
+              : 365;
+        const cutoff = Date.now() - days * 86400000;
+
+        const [batchesResult, inspectionsResult, handoffsResult] = await Promise.all([
+          supabase
+            .from("batches")
+            .select("batch_id, crop_type, status, registered_at, farm_id, tx_hash, farms(location)"),
+          supabase
+            .from("inspections")
+            .select("batch_id, inspector_id, gmo_test_result, certificate_issued, tx_hash, inspected_at"),
+          supabase
+            .from("handoffs")
+            .select("batch_id, tx_hash, handed_off_at"),
         ]);
-        const queryError = farmsResult.error || batchesResult.error || certifiedResult.error || flagsResult.error || auditResult.error || inspectionsResult.error;
+        const queryError = batchesResult.error || inspectionsResult.error || handoffsResult.error;
         if (queryError) throw queryError;
 
-        const totalBatches = batchesResult.count || 0;
-        const batches = batchesResult.data ?? [];
-        const inspections = inspectionsResult.data ?? [];
-        const farmRegions = (farmsResult.data ?? []).map((farm) => farm.region).filter(Boolean) as string[];
+        const validTime = (value: string | null) => {
+          if (!value) return null;
+          const timestamp = new Date(value).getTime();
+          return Number.isFinite(timestamp) ? timestamp : null;
+        };
+        const allBatches = batchesResult.data ?? [];
+        const batchMap = new Map(allBatches.map((batch) => [batch.batch_id, batch]));
+        const batches = allBatches.filter((batch) => {
+          const timestamp = validTime(batch.registered_at);
+          return timestamp !== null && timestamp >= cutoff;
+        });
+        const batchIds = new Set(batches.map((batch) => batch.batch_id));
+        const inspections = (inspectionsResult.data ?? []).filter((inspection) => {
+          const timestamp = validTime(inspection.inspected_at);
+          return timestamp !== null && timestamp >= cutoff && batchIds.has(inspection.batch_id);
+        });
+        const handoffs = (handoffsResult.data ?? []).filter((handoff) => {
+          const timestamp = validTime(handoff.handed_off_at);
+          return timestamp !== null && timestamp >= cutoff && batchIds.has(handoff.batch_id);
+        });
+
+        const certifiedIds = new Set(
+          inspections
+            .filter((inspection) => inspection.certificate_issued)
+            .map((inspection) => inspection.batch_id),
+        );
+        const flaggedIds = new Set(
+          batches
+            .filter((batch) => batch.status === "FLAGGED")
+            .map((batch) => batch.batch_id),
+        );
+        for (const inspection of inspections) {
+          if (inspection.gmo_test_result === "GMO_PRESENT") flaggedIds.add(inspection.batch_id);
+        }
 
         const registrationsByDay = new Map<string, number>();
-        const certificationsByDay = new Map<string, number>();
         for (const batch of batches) {
-          const dayKey = batch.registered_at ? new Date(batch.registered_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-          registrationsByDay.set(dayKey, (registrationsByDay.get(dayKey) ?? 0) + 1);
+          if (!batch.registered_at) continue;
+          const key = new Date(batch.registered_at).toISOString().slice(0, 10);
+          registrationsByDay.set(key, (registrationsByDay.get(key) ?? 0) + 1);
         }
+        const certificationsByDay = new Map<string, number>();
         for (const inspection of inspections) {
-          const dayKey = inspection.created_at ? new Date(inspection.created_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-          if (inspection.passed) {
-            certificationsByDay.set(dayKey, (certificationsByDay.get(dayKey) ?? 0) + 1);
-          }
+          if (!inspection.certificate_issued || !inspection.inspected_at) continue;
+          const key = new Date(inspection.inspected_at).toISOString().slice(0, 10);
+          certificationsByDay.set(key, (certificationsByDay.get(key) ?? 0) + 1);
         }
 
         const cropTotals = new Map<string, { total: number; certified: number }>();
         for (const batch of batches) {
-          const crop = String(batch.crop_type || "Other");
+          const crop = batch.crop_type || "Other";
           const current = cropTotals.get(crop) ?? { total: 0, certified: 0 };
           current.total += 1;
-          if (batch.status === "CERTIFIED") current.certified += 1;
+          if (certifiedIds.has(batch.batch_id)) current.certified += 1;
           cropTotals.set(crop, current);
         }
 
-        const regionCounts = new Map<string, number>();
-        for (const farm of farmsResult.data ?? []) {
-          const regionName = String(farm.region || "Unassigned");
-          regionCounts.set(regionName, (regionCounts.get(regionName) ?? 0) + 1);
+        const regionFlags = new Map<string, number>();
+        for (const batchId of flaggedIds) {
+          const batch = batchMap.get(batchId);
+          const farm = batch && (Array.isArray(batch.farms) ? batch.farms[0] : batch.farms);
+          const region = farm?.location?.trim() || "Unspecified region";
+          regionFlags.set(region, (regionFlags.get(region) ?? 0) + 1);
         }
 
-        const flaggedRegions = [...regionCounts.entries()]
-          .map(([name, count]) => ({ name, count, tone: count >= 10 ? "red" as const : "amber" as const }))
-          .sort((a, b) => b.count - a.count)
-          .slice(0, 5);
-
-        const inspectorMap = new Map<string, { count: number; certs: number; region: string }>();
+        const inspectorMap = new Map<string, {
+          count: number;
+          certifications: number;
+          totalDays: number;
+          measured: number;
+          regions: Set<string>;
+        }>();
         for (const inspection of inspections) {
-          const inspectorId = inspection.inspector_id || "unknown";
-          const current = inspectorMap.get(inspectorId) ?? { count: 0, certs: 0, region: "Network" };
+          const id = inspection.inspector_id || "Unassigned";
+          const current = inspectorMap.get(id) ?? {
+            count: 0,
+            certifications: 0,
+            totalDays: 0,
+            measured: 0,
+            regions: new Set<string>(),
+          };
           current.count += 1;
-          if (inspection.passed) current.certs += 1;
-          inspectorMap.set(inspectorId, current);
+          if (inspection.certificate_issued) current.certifications += 1;
+          const batch = batchMap.get(inspection.batch_id);
+          const registered = validTime(batch?.registered_at ?? null);
+          const inspected = validTime(inspection.inspected_at);
+          if (registered !== null && inspected !== null && inspected >= registered) {
+            current.totalDays += (inspected - registered) / 86400000;
+            current.measured += 1;
+          }
+          const farm = batch && (Array.isArray(batch.farms) ? batch.farms[0] : batch.farms);
+          if (farm?.location?.trim()) current.regions.add(farm.location.trim());
+          inspectorMap.set(id, current);
         }
 
-        const inspectorSummary = [...inspectorMap.entries()]
-          .map(([id, stats]) => ({
-            id: id.slice(0, 8),
-            region: farmRegions[0] || "Network",
-            batches: String(stats.count),
-            time: `${Math.max(1, Math.min(5, stats.count)).toFixed(1)} days`,
-            certs: String(stats.certs),
-          }))
-          .sort((a, b) => Number(b.batches) - Number(a.batches))
-          .slice(0, 5);
+        const transactionHashes = new Set<string>();
+        for (const record of [...batches, ...inspections, ...handoffs]) {
+          if (record.tx_hash) transactionHashes.add(record.tx_hash.toLowerCase());
+        }
 
         setRegulatorData({
-          activeFarms: farmsResult.count || 0,
-          complianceRate: totalBatches ? ((certifiedResult.count || 0) / totalBatches) * 100 : 0,
-          activeFlags: flagsResult.count || 0,
-          blockchainTransactions: auditResult.count || 0,
+          activeFarms: new Set(batches.map((batch) => batch.farm_id).filter(Boolean)).size,
+          complianceRate: batches.length ? (certifiedIds.size / batches.length) * 100 : 0,
+          activeFlags: flaggedIds.size,
+          blockchainTransactions: transactionHashes.size,
           dailyRegistrations: [...registrationsByDay.entries()].map(([date, count]) => ({ date, count })),
           dailyCertifications: [...certificationsByDay.entries()].map(([date, count]) => ({ date, count })),
-          cropBreakdown: [...cropTotals.entries()].map(([crop, stats]) => ({
-            crop,
-            rate: stats.total ? ((stats.certified / stats.total) * 100) : 0,
-          })).sort((a, b) => b.rate - a.rate).slice(0, 5),
-          regionFlags: flaggedRegions,
-          inspectorSummary,
+          cropBreakdown: [...cropTotals.entries()]
+            .map(([crop, stats]) => ({
+              crop,
+              rate: stats.total ? (stats.certified / stats.total) * 100 : 0,
+            }))
+            .sort((a, b) => b.rate - a.rate)
+            .slice(0, 5),
+          regionFlags: [...regionFlags.entries()]
+            .map(([name, count]) => ({ name, count, tone: count >= 10 ? "red" as const : "amber" as const }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 5),
+          inspectorSummary: [...inspectorMap.entries()]
+            .map(([id, stats]) => ({
+              id: id === "Unassigned" ? id : id.slice(0, 8),
+              region: [...stats.regions].join(", ") || "Network",
+              batches: String(stats.count),
+              time: stats.measured ? (stats.totalDays / stats.measured).toFixed(1) + " days" : "N/A",
+              certs: String(stats.certifications),
+            }))
+            .sort((a, b) => Number(b.batches) - Number(a.batches))
+            .slice(0, 5),
         });
       } catch (error) {
-        console.error("Error loading regulator analytics:", error);
+        const value = typeof error === "object" && error ? error as Record<string, unknown> : {};
+        const message = typeof value.message === "string"
+          ? value.message
+          : error instanceof Error ? error.message : "Unknown analytics query error";
+        const code = typeof value.code === "string" ? value.code : null;
+        console.warn("[AgriTrust Analytics] Regulator query failed", {
+          message,
+          code,
+          details: typeof value.details === "string" ? value.details : null,
+          hint: typeof value.hint === "string" ? value.hint : null,
+        });
+        setLoadError(code ? message + " [" + code + "]" : message);
       } finally {
         setIsLoading(false);
       }
     }
 
-    loadRegulatorAnalytics();
-  }, []);
+    void loadRegulatorAnalytics();
+  }, [activeRange]);
 
   const lineData = useMemo(() => {
-    const days = Array.from({ length: 30 }, (_, index) => {
+    const registrations = new Map(
+      regulatorData.dailyRegistrations.map((item) => [item.date, item.count]),
+    );
+    const certifications = new Map(
+      regulatorData.dailyCertifications.map((item) => [item.date, item.count]),
+    );
+
+    if (activeRange === "12 months") {
+      const values = Array.from({ length: 12 }, (_, index) => {
+        const date = new Date();
+        date.setUTCDate(1);
+        date.setUTCHours(0, 0, 0, 0);
+        date.setUTCMonth(date.getUTCMonth() - (11 - index));
+        return {
+          key: date.toISOString().slice(0, 7),
+          day: date.toLocaleString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" }),
+          registrations: 0,
+          certifications: 0,
+        };
+      });
+      for (const [date, count] of registrations) {
+        const item = values.find((value) => value.key === date.slice(0, 7));
+        if (item) item.registrations += count;
+      }
+      for (const [date, count] of certifications) {
+        const item = values.find((value) => value.key === date.slice(0, 7));
+        if (item) item.certifications += count;
+      }
+      return values;
+    }
+
+    const length = activeRange === "7 days" ? 7 : activeRange === "90 days" ? 90 : 30;
+    return Array.from({ length }, (_, index) => {
       const date = new Date();
-      date.setDate(date.getDate() - (29 - index));
+      date.setUTCHours(0, 0, 0, 0);
+      date.setUTCDate(date.getUTCDate() - (length - 1 - index));
+      const key = date.toISOString().slice(0, 10);
       return {
-        day: date.toLocaleString("en-US", { month: "short", day: "numeric" }),
-        registrations: 0,
-        certifications: 0,
+        key,
+        day: date.toLocaleString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }),
+        registrations: registrations.get(key) ?? 0,
+        certifications: certifications.get(key) ?? 0,
       };
     });
-
-    const rawRegistrations = regulatorData.dailyRegistrations ?? [];
-    const rawCertifications = regulatorData.dailyCertifications ?? [];
-
-    for (const item of rawRegistrations) {
-      const label = new Date(item.date).toLocaleString("en-US", { month: "short", day: "numeric" });
-      const match = days.find((entry) => entry.day === label);
-      if (match) match.registrations = Number(item.count ?? 0);
-    }
-
-    for (const item of rawCertifications) {
-      const label = new Date(item.date).toLocaleString("en-US", { month: "short", day: "numeric" });
-      const match = days.find((entry) => entry.day === label);
-      if (match) match.certifications = Number(item.count ?? 0);
-    }
-
-    return days;
-  }, [regulatorData]);
-
-
+  }, [activeRange, regulatorData.dailyCertifications, regulatorData.dailyRegistrations]);
 
   const ranges = ["7 days", "30 days", "90 days", "12 months"];
 
@@ -939,6 +1067,12 @@ function RegulatorAnalytics() {
 
 
 
+      {loadError ? (
+        <div className="mx-8 mb-6 rounded-xl border border-accent-red/30 bg-accent-red/10 px-4 py-3 text-sm text-accent-red">
+          Analytics could not be loaded: {loadError}
+        </div>
+      ) : null}
+
       <section className="mb-8 grid grid-cols-1 gap-4 px-8 md:grid-cols-2 xl:grid-cols-4">
         {regulatorStats.map((stat) => (
           <StatCard key={stat.label} {...stat} />
@@ -1040,7 +1174,7 @@ function RegulatorAnalytics() {
 
                 <XAxis
                   type="number"
-                  domain={[80, 100]}
+                  domain={[0, 100]}
                   tick={{ fill: "#6b6b80" }}
                   fontSize={12}
                 />
@@ -1114,7 +1248,7 @@ function RegulatorAnalytics() {
 
 
 
-      <section className="mx-8 overflow-hidden rounded-xl glass">
+      <section className="mx-8 overflow-x-auto rounded-xl glass">
 
         <table className="min-w-full">
 
@@ -1156,7 +1290,7 @@ function RegulatorAnalytics() {
 
           <tbody>
 
-            {(regulatorData.inspectorSummary.length ? regulatorData.inspectorSummary : [{ id: "No data", region: "Network", batches: "0", time: "0.0 days", certs: "0" }]).map((row) => (
+            {(regulatorData.inspectorSummary.length ? regulatorData.inspectorSummary : [{ id: "No data", region: "Network", batches: "0", time: "N/A", certs: "0" }]).map((row) => (
 
               <tr
 
@@ -1212,21 +1346,50 @@ function RegulatorAnalytics() {
 
 export default function AnalyticsPage() {
   const [role, setRole] = useState<UserRole | null>(null);
+  const [roleError, setRoleError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadRole() {
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData.user) return;
-      const { data: profile } = await supabase
-        .from("users")
-        .select("role")
-        .eq("id", userData.user.id)
-        .maybeSingle();
-      setRole(profile?.role as UserRole | null);
+      try {
+        const { data: userData, error: userError } = await supabase.auth.getUser();
+        if (userError || !userData.user) {
+          throw userError ?? new Error("A signed-in user is required.");
+        }
+        const { data: profile, error: profileError } = await supabase
+          .from("users")
+          .select("role")
+          .eq("id", userData.user.id)
+          .single();
+        if (profileError) throw profileError;
+        setRole(profile.role as UserRole);
+      } catch (error) {
+        const value = typeof error === "object" && error ? error as Record<string, unknown> : {};
+        const message = typeof value.message === "string"
+          ? value.message
+          : error instanceof Error ? error.message : "Unknown role query error";
+        const code = typeof value.code === "string" ? value.code : null;
+        console.warn("[AgriTrust Analytics] Role query failed", {
+          message,
+          code,
+          details: typeof value.details === "string" ? value.details : null,
+          hint: typeof value.hint === "string" ? value.hint : null,
+        });
+        setRoleError(code ? message + " [" + code + "]" : message);
+      }
     }
-    loadRole();
+    void loadRole();
   }, []);
 
+  if (roleError) {
+    return (
+      <div className="m-8 rounded-xl border border-accent-red/30 bg-accent-red/10 px-4 py-3 text-sm text-accent-red">
+        Analytics access could not be verified: {roleError}
+      </div>
+    );
+  }
+  if (!role) {
+    return <p className="px-8 py-10 text-sm text-agri-muted">Loading analytics...</p>;
+  }
   if (role === "REGULATOR") return <RegulatorAnalytics />;
   return <FarmerAnalytics />;
 }

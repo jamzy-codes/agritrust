@@ -114,7 +114,7 @@ export default function VerificationQr({
   }
 
   const buttonClassName =
-    "flex items-center justify-center gap-1.5 rounded-lg border border-agri-border px-3 py-2 text-xs text-agri-text transition-colors hover:bg-agri-raised disabled:cursor-not-allowed disabled:opacity-50";
+    "flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-agri-border px-3 py-2 text-xs text-agri-text transition-colors hover:bg-agri-raised disabled:cursor-not-allowed disabled:opacity-50";
 
   return (
     <div

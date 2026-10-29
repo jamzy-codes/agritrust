@@ -27,7 +27,7 @@ function connectorClassName(
 
 export function MiniTimeline({ stages }: MiniTimelineProps) {
   return (
-    <div className="flex items-center">
+    <div className="flex min-w-112 items-center">
       {stages.map((stage, index) => (
         <div key={`${labels[index]}-${stage}`} className="flex flex-1 items-center last:flex-none">
           <div className="flex flex-col items-center">

@@ -1,7 +1,5 @@
 "use client";
 
-"use client";
-
 import { Code2, Copy, FileCheck, ShieldCheck, Truck } from "lucide-react";
 import { useAccount, useChainId } from "wagmi";
 

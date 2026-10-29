@@ -76,7 +76,7 @@ export default function RegisterPage() {
 
     setIsSubmitting(true);
 
-    // Create the user via our server-side admin route (bypasses confirmation email)
+    // Create the user through the project's normal Supabase signup policy.
     const signupResponse = await fetch("/api/auth/signup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -170,7 +170,7 @@ export default function RegisterPage() {
             <label className="block">
               <span className="mb-1 block text-sm text-agri-muted">Phone</span>
               <div
-                className="[&_.react-international-phone-input-container]:!w-full [&_.react-international-phone-input-container]:!flex [&_.react-international-phone-country-selector-button]:!bg-agri-raised [&_.react-international-phone-country-selector-button]:!border-agri-border [&_.react-international-phone-country-selector-button]:!rounded-l-lg [&_.react-international-phone-country-selector-button]:!h-[42px] [&_.react-international-phone-country-selector-button]:hover:!bg-agri-overlay [&_.react-international-phone-country-selector-dropdown]:!bg-agri-surface [&_.react-international-phone-country-selector-dropdown]:!border-agri-border [&_.react-international-phone-country-selector-dropdown]:!text-agri-text [&_.react-international-phone-country-selector-dropdown-item]:hover:!bg-agri-raised [&_.react-international-phone-country-selector-dropdown-item--selected]:!bg-agri-overlay [&_.react-international-phone-input]:!w-full [&_.react-international-phone-input]:!h-[42px] [&_.react-international-phone-input]:!bg-agri-raised [&_.react-international-phone-input]:!border-agri-border [&_.react-international-phone-input]:!rounded-r-lg [&_.react-international-phone-input]:!text-agri-text [&_.react-international-phone-input]:!px-4 [&_.react-international-phone-input]:!text-sm [&_.react-international-phone-input]:focus:!border-agri-border-focus"
+                className="[&_.react-international-phone-input-container]:!w-full [&_.react-international-phone-input-container]:!flex [&_.react-international-phone-country-selector-button]:!min-w-11 [&_.react-international-phone-country-selector-button]:!bg-agri-raised [&_.react-international-phone-country-selector-button]:!border-agri-border [&_.react-international-phone-country-selector-button]:!rounded-l-lg [&_.react-international-phone-country-selector-button]:!h-[44px] [&_.react-international-phone-country-selector-button]:hover:!bg-agri-overlay [&_.react-international-phone-country-selector-dropdown]:!bg-agri-surface [&_.react-international-phone-country-selector-dropdown]:!border-agri-border [&_.react-international-phone-country-selector-dropdown]:!text-agri-text [&_.react-international-phone-country-selector-dropdown-item]:hover:!bg-agri-raised [&_.react-international-phone-country-selector-dropdown-item--selected]:!bg-agri-overlay [&_.react-international-phone-input]:!w-full [&_.react-international-phone-input]:!h-[44px] [&_.react-international-phone-input]:!bg-agri-raised [&_.react-international-phone-input]:!border-agri-border [&_.react-international-phone-input]:!rounded-r-lg [&_.react-international-phone-input]:!text-agri-text [&_.react-international-phone-input]:!px-4 [&_.react-international-phone-input]:!text-sm [&_.react-international-phone-input]:focus:!border-agri-border-focus"
               >
                 <PhoneInput
                   defaultCountry="ng"
@@ -193,7 +193,7 @@ export default function RegisterPage() {
                   onChange={(event) => updateField("password", event.target.value)}
                 />
                 <button
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-agri-muted hover:text-agri-text"
+                  className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-md text-agri-muted hover:bg-agri-overlay hover:text-agri-text"
                   type="button"
                   onClick={() => setShowPassword((current) => !current)}
                   aria-label={showPassword ? "Hide password" : "Show password"}
@@ -215,7 +215,7 @@ export default function RegisterPage() {
                   onChange={(event) => updateField("confirmPassword", event.target.value)}
                 />
                 <button
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-agri-muted hover:text-agri-text"
+                  className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-md text-agri-muted hover:bg-agri-overlay hover:text-agri-text"
                   type="button"
                   onClick={() => setShowConfirmPassword((current) => !current)}
                   aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
@@ -257,11 +257,11 @@ export default function RegisterPage() {
 
           <p className="mt-4 text-center text-sm text-agri-muted">
             Already have an account?{" "}
-            <Link className="text-accent-green" href="/login">
+            <Link className="inline-flex min-h-10 items-center text-accent-green" href="/login">
               Sign in
             </Link>
           </p>
         </section>
       </main>
     );
-  } 
+  }

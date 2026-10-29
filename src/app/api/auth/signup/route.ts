@@ -1,12 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
-// Server-side only client using the service role key.
-// This bypasses email confirmation entirely by creating
-// already-confirmed users directly.
-const supabaseAdmin = createClient(
+// Use the anonymous client so the project's normal signup, rate-limit, and
+// email-confirmation settings remain authoritative. Never expose or use the
+// service-role credential for a public account-creation endpoint.
+const supabaseAuth = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  { auth: { persistSession: false, autoRefreshToken: false } },
 );
 
 export async function POST(request: NextRequest) {
@@ -20,13 +21,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data, error } = await supabaseAdmin.auth.admin.createUser({
+    const { data, error } = await supabaseAuth.auth.signUp({
       email,
       password,
-      email_confirm: true, // skips sending a confirmation email entirely
-      user_metadata: {
-        full_name: fullName ?? null,
-        phone: phone ?? null,
+      options: {
+        data: {
+          full_name: fullName ?? null,
+          phone: phone ?? null,
+        },
       },
     });
 
@@ -35,7 +37,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ user: data.user });
-  } catch (err) {
+  } catch {
     return NextResponse.json(
       { error: "Unexpected server error during signup" },
       { status: 500 }

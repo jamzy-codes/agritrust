@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { normalizeBatchRecord } from "@/lib/data-model";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { apiAuthErrorResponse, ApiAuthError, requireApiProfile } from "@/lib/server/api-auth";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
+    const profile = await requireApiProfile(request);
     const { data, error } = await supabaseAdmin
       .from("batches")
       .select("*, farms(farm_name, location)")
@@ -23,8 +25,14 @@ export async function GET(
       return NextResponse.json({ error: "Batch not found" }, { status: 404 });
     }
 
+    if (profile.role === "FARMER" && data.registered_by !== profile.id) {
+      throw new ApiAuthError("You may only view your own batch records.", 403);
+    }
+
     return NextResponse.json({ batch: data });
   } catch (error) {
+    const authResponse = apiAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     const message = error instanceof Error ? error.message : "Unexpected error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -36,6 +44,7 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
+    await requireApiProfile(request, ["REGULATOR"]);
     const body = await request.json();
     const normalized = normalizeBatchRecord(body);
     const updatePayload = {
@@ -44,12 +53,6 @@ export async function PATCH(
       quantity_kg: normalized.quantity_kg ?? undefined,
       seed_variety: normalized.seed_variety ?? undefined,
       is_gmo_free: normalized.is_gmo_free ?? undefined,
-      gmo_status: normalized.gmo_status ?? undefined,
-      status: normalized.status ?? undefined,
-      tx_hash: normalized.tx_hash ?? undefined,
-      metadata_uri: normalized.metadata_uri ?? undefined,
-      metadata_hash: normalized.metadata_hash ?? undefined,
-      updated_at: new Date().toISOString(),
     };
 
     const cleanedPayload = Object.fromEntries(
@@ -73,6 +76,8 @@ export async function PATCH(
 
     return NextResponse.json({ batch: data });
   } catch (error) {
+    const authResponse = apiAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     const message = error instanceof Error ? error.message : "Unexpected error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

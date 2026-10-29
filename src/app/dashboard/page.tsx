@@ -31,7 +31,13 @@ import type { UserRole } from "@/types";
 import { MiniTimeline } from "@/components/ui/MiniTimeline";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { fetchRealAlerts, logAlertsError, type RealAlert } from "@/lib/alerts";
+import {
+  extractErrorDetails,
+  fetchRealAlerts,
+  formatErrorDetails,
+  logAlertsError,
+  type RealAlert,
+} from "@/lib/alerts";
 import { supabase } from "@/lib/supabase";
 
 
@@ -320,6 +326,7 @@ function FarmerDashboard() {
 
 function RegulatorDashboard() {
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [statsData, setStatsData] = useState({
     compliantBatches: 0,
     flaggedBatches: 0,
@@ -331,66 +338,111 @@ function RegulatorDashboard() {
 
   useEffect(() => {
     async function loadRegulatorStats() {
+      setIsLoading(true);
+      setLoadError(null);
+
       try {
-        const [compliantResult, flaggedResult, farmsResult, regionalResult] = await Promise.all([
-          supabase.from("batches").select("id", { count: "exact", head: true }).eq("status", "CERTIFIED"),
-          supabase.from("batches").select("id", { count: "exact", head: true }).eq("status", "FLAGGED"),
-          supabase.from("farms").select("id", { count: "exact", head: true }),
-          supabase.from("batches").select("status, farms(location)"),
+        const [batchesResult, inspectionsResult] = await Promise.all([
+          supabase
+            .from("batches")
+            .select("batch_id, farm_id, status, farms(location)")
+            .order("registered_at", { ascending: false }),
+          supabase
+            .from("inspections")
+            .select("batch_id, certificate_issued, gmo_test_result, inspected_at")
+            .order("inspected_at", { ascending: false }),
         ]);
 
         const queryError =
-          compliantResult.error ||
-          flaggedResult.error ||
-          farmsResult.error ||
-          regionalResult.error;
-        if (queryError) {
-          console.error("Error loading regulator dashboard statistics:", queryError);
-          return;
+          batchesResult.error || inspectionsResult.error;
+        if (queryError) throw queryError;
+
+        const batches = batchesResult.data ?? [];
+        const inspections = inspectionsResult.data ?? [];
+        const certifiedBatchIds = new Set(
+          inspections
+            .filter(
+              (inspection) =>
+                inspection.certificate_issued &&
+                inspection.gmo_test_result !== "GMO_PRESENT",
+            )
+            .map((inspection) => inspection.batch_id),
+        );
+        const flaggedBatchIds = new Set(
+          batches
+            .filter((batch) => batch.status === "FLAGGED")
+            .map((batch) => batch.batch_id),
+        );
+        for (const inspection of inspections) {
+          if (inspection.gmo_test_result === "GMO_PRESENT") {
+            flaggedBatchIds.add(inspection.batch_id);
+          }
         }
 
-        const regionalTotals = new Map<string, { total: number; compliant: number }>();
-        for (const batch of regionalResult.data ?? []) {
-          const farmRelation = Array.isArray(batch.farms) ? batch.farms[0] : batch.farms;
-          const state = farmRelation?.location?.trim() || "Unspecified region";
-          const current = regionalTotals.get(state) ?? { total: 0, compliant: 0 };
+        const regionalTotals = new Map<
+          string,
+          { total: number; compliant: number }
+        >();
+        for (const batch of batches) {
+          const farmRelation = Array.isArray(batch.farms)
+            ? batch.farms[0]
+            : batch.farms;
+          const state =
+            farmRelation?.location?.trim() || "Unspecified region";
+          const current = regionalTotals.get(state) ?? {
+            total: 0,
+            compliant: 0,
+          };
           current.total += 1;
-          if (batch.status === "CERTIFIED" || batch.status === "DELIVERED") {
-            current.compliant += 1;
-          }
+          if (certifiedBatchIds.has(batch.batch_id)) current.compliant += 1;
           regionalTotals.set(state, current);
         }
+
         const liveRegionData = Array.from(regionalTotals.entries())
           .map(([state, totals]) => ({
             state,
-            compliance: Math.round((totals.compliant / totals.total) * 1000) / 10,
+            compliance:
+              Math.round((totals.compliant / totals.total) * 1000) / 10,
             batches: totals.total,
           }))
           .sort((first, second) => second.compliance - first.compliance)
           .slice(0, 5);
+
         let liveAlerts: RealAlert[] = [];
         try {
           liveAlerts = await fetchRealAlerts("REGULATOR");
-        } catch (alertErr) {
-          logAlertsError("Error loading live alerts for regulator overview", alertErr);
+        } catch (alertError) {
+          logAlertsError(
+            "Error loading live alerts for regulator overview",
+            alertError,
+          );
+          setLoadError("Alert metrics could not be loaded: " + formatErrorDetails(alertError));
         }
 
         setStatsData({
-          compliantBatches: compliantResult.count || 0,
-          flaggedBatches: flaggedResult.count || 0,
-          activeAlerts: liveAlerts.length,
-          activeFarms: farmsResult.count || 0,
+          compliantBatches: certifiedBatchIds.size,
+          flaggedBatches: flaggedBatchIds.size,
+          activeAlerts: liveAlerts.filter(
+            (alert) => alert.type === "critical",
+          ).length,
+          activeFarms: new Set(batches.map((batch) => batch.farm_id).filter(Boolean)).size,
         });
         setRecentAlerts(liveAlerts.slice(0, 4));
         setRegionData(liveRegionData);
+      } catch (error) {
+        const details = extractErrorDetails(error);
+        console.warn("[AgriTrust Dashboard] Regulator statistics query failed", {
+          operation: "load regulator dashboard statistics",
+          ...details,
+        });
+        setLoadError(formatErrorDetails(error));
       } finally {
         setIsLoading(false);
       }
     }
 
-    loadRegulatorStats();
+    void loadRegulatorStats();
   }, []);
-
   const stats: StatCardProps[] = [
     {
       icon: CheckCircle2,
@@ -447,6 +499,12 @@ function RegulatorDashboard() {
         </h1>
         <p className="mt-1 text-agri-muted">Live compliance visibility across the AgriTrust network.</p>
       </header>
+
+      {loadError ? (
+        <div className="mb-6 rounded-xl border border-accent-red/30 bg-accent-red/10 px-4 py-3 text-sm text-accent-red">
+          Regulator statistics could not be loaded: {loadError}
+        </div>
+      ) : null}
 
       <section className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {stats.map((stat) => (

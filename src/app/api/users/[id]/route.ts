@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { apiAuthErrorResponse, ApiAuthError, requireApiProfile } from "@/lib/server/api-auth";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
+    const profile = await requireApiProfile(request);
+    if (profile.id !== id && profile.role !== "REGULATOR") {
+      throw new ApiAuthError("You may only view your own profile.", 403);
+    }
     const { data, error } = await supabaseAdmin
       .from("users")
       .select("id, full_name, email, role, wallet_address")
@@ -24,6 +29,8 @@ export async function GET(
 
     return NextResponse.json({ user: data });
   } catch (error) {
+    const authResponse = apiAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     const message = error instanceof Error ? error.message : "Unexpected error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -35,12 +42,14 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
+    const profile = await requireApiProfile(request);
+    if (profile.id !== id) {
+      throw new ApiAuthError("You may only update your own profile.", 403);
+    }
     const body = await request.json();
     const updatePayload = {
       full_name: body.fullName ?? body.full_name,
       wallet_address: body.walletAddress ?? body.wallet_address,
-      role: body.role,
-      updated_at: new Date().toISOString(),
     };
 
     const cleanedPayload = Object.fromEntries(
@@ -64,6 +73,8 @@ export async function PATCH(
 
     return NextResponse.json({ user: data });
   } catch (error) {
+    const authResponse = apiAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     const message = error instanceof Error ? error.message : "Unexpected error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

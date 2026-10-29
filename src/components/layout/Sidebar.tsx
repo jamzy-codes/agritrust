@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { DASHBOARD_ROUTE_ACCESS } from "@/lib/route-access";
 import type { UserRole } from "@/types";
@@ -91,6 +91,7 @@ export default function Sidebar({
   onNavigate,
 }: SidebarProps) {
   const [isHovered, setIsHovered] = useState(false);
+  const asideRef = useRef<HTMLElement>(null);
   const pathname = usePathname();
   const resolvedRole = role ?? DEFAULT_ROLE;
   const styles = roleStyles[resolvedRole];
@@ -99,9 +100,17 @@ export default function Sidebar({
     DASHBOARD_ROUTE_ACCESS[route].includes(resolvedRole),
   );
 
+  useEffect(() => {
+    if (isMobileOpen) asideRef.current?.focus();
+  }, [isMobileOpen]);
+
   return (
     <aside
-      className={`fixed bottom-0 left-0 top-28 z-50 lg:top-16 flex flex-col overflow-y-auto border-r border-white/5  bg-agri-surface transition-[width,transform] duration-300 ease-out ${isExpanded ? "w-65px" : "w-14"
+      ref={asideRef}
+      id="dashboard-navigation"
+      tabIndex={-1}
+      aria-label="Dashboard navigation"
+      className={`fixed bottom-0 left-0 top-28 z-50 lg:top-16 flex flex-col overflow-x-hidden overflow-y-auto border-r border-white/5 bg-agri-surface transition-[width,transform] duration-300 ease-out ${isExpanded ? "w-65px" : "w-14"
         } ${isMobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         }`}
       onMouseEnter={() => setIsHovered(true)}
@@ -160,6 +169,7 @@ export default function Sidebar({
               : "mx-auto h-9 w-9 justify-center"
             }`}
           title={isExpanded ? undefined : "Logout"}
+          onClick={onNavigate}
         >
           <LogOut className="h-5 w-5 shrink-0" />
           <span

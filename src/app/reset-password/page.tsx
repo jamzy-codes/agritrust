@@ -41,7 +41,7 @@ export default function ResetPasswordPage() {
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-agri-muted" />
               <input className="w-full rounded-lg border border-agri-border bg-agri-raised px-4 py-2.5 pl-9 pr-10 text-sm text-agri-text focus:border-agri-border-focus focus:outline-none" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" required />
-              <button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute right-3 top-1/2 -translate-y-1/2 text-agri-muted hover:text-agri-text" aria-label={showPassword ? "Hide password" : "Show password"}>
+              <button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-md text-agri-muted hover:bg-agri-overlay hover:text-agri-text" aria-label={showPassword ? "Hide password" : "Show password"}>
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
@@ -53,7 +53,7 @@ export default function ResetPasswordPage() {
           {error ? <p className="text-sm text-accent-red" role="alert">{error}</p> : null}
           <button className="w-full rounded-lg bg-accent-blue py-2.5 font-medium text-white hover:bg-accent-blue/90 disabled:opacity-60" type="submit" disabled={isSaving}>{isSaving ? "Saving password..." : "Update password"}</button>
         </form>
-        <p className="mt-4 text-center text-sm text-agri-muted"><Link className="text-accent-green" href="/login">Return to sign in</Link></p>
+        <p className="mt-4 text-center text-sm text-agri-muted"><Link className="inline-flex min-h-10 items-center text-accent-green" href="/login">Return to sign in</Link></p>
       </section>
     </main>
   );

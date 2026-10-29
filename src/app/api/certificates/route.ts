@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { buildCertificatePayload, normalizeCertificateRecord } from "@/lib/data-model";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { apiAuthErrorResponse, requireApiProfile } from "@/lib/server/api-auth";
 
 export async function GET(request: NextRequest) {
   try {
+    await requireApiProfile(request);
     const batchId = request.nextUrl.searchParams.get("batchId");
 
     if (!batchId) {
@@ -23,6 +25,8 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ certificates: data ?? [] });
   } catch (error) {
+    const authResponse = apiAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     const message = error instanceof Error ? error.message : "Unexpected error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -30,10 +34,11 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const profile = await requireApiProfile(request, ["INSPECTOR"]);
     const body = await request.json();
     const normalized = normalizeCertificateRecord(body);
     const batchId = normalized.batch_id;
-    const inspectorId = normalized.inspector_id;
+    const inspectorId = profile.id;
 
     if (!batchId || !inspectorId) {
       return NextResponse.json(
@@ -60,6 +65,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ certificate: data }, { status: 201 });
   } catch (error) {
+    const authResponse = apiAuthErrorResponse(error);
+    if (authResponse) return authResponse;
     const message = error instanceof Error ? error.message : "Unexpected error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

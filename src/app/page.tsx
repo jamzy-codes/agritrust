@@ -93,7 +93,7 @@ const navigationItems = [
   { label: "How it works", href: "#how-it-works" },
   { label: "For Farmers", href: "#for-farmers" },
   { label: "For Regulators", href: "#for-regulators" },
-  { label: "Verify Produce", href: "/verify/AGT-0042" },
+  { label: "Verify Produce", href: "/verify" },
 ] as const;
 export default function Home() {
   return (
@@ -111,7 +111,7 @@ export default function Home() {
             <p>AgriTrust gives farms, inspectors, regulators, and consumers one trusted source of truth for safe, traceable produce.</p>
             <div className="landing-actions">
               <Link className="landing-button landing-button-light" href="/register"><Sprout aria-hidden="true" />Register Your Farm</Link>
-              <Link className="landing-button landing-button-outline" href="/verify/AGT-0042"><QrCode aria-hidden="true" />Scan a Product</Link>
+              <Link className="landing-button landing-button-outline" href="/verify"><QrCode aria-hidden="true" />Scan a Product</Link>
             </div>
             <div className="landing-trust"><span><CheckCircle2 aria-hidden="true" />Tamper-proof records</span><span><ShieldCheck aria-hidden="true" />NAFDAC-ready</span><span><ChainLink aria-hidden="true" />Blockchain-anchored</span></div>
           </div>
@@ -148,13 +148,13 @@ export default function Home() {
       <section className="landing-cta-section" aria-labelledby="cta-heading">
         <div className="landing-cta landing-container">
         <Image className="landing-cta-photo" src="/landing/farmer.webp" alt="Farmer holding freshly harvested vegetables in a field" width={290} height={192} unoptimized />
-        <div className="landing-cta-content"><h2 id="cta-heading">Start tracing your produce today</h2><p>Create a trusted produce passport and make every handoff visible from farm to market.</p><div className="landing-actions"><Link className="landing-button landing-button-green" href="/register">Get Started Free</Link><Link className="landing-button landing-button-outline" href="/verify/AGT-0042">Verify a Product</Link></div></div>
+        <div className="landing-cta-content"><h2 id="cta-heading">Start tracing your produce today</h2><p>Create a trusted produce passport and make every handoff visible from farm to market.</p><div className="landing-actions"><Link className="landing-button landing-button-green" href="/register">Get Started Free</Link><Link className="landing-button landing-button-outline" href="/verify">Verify a Product</Link></div></div>
         </div>
       </section>
       <footer className="landing-footer">
         <div className="landing-container landing-footer-top">
           <div><BrandLogo size="sm" textClassName="text-xl" /><p>Transparent produce.<br />Trusted by nature.</p></div>
-          <div className="landing-footer-links"><div><a href="#how-it-works">How it works</a><Link href="/register">Farmers</Link></div><div><Link href="/onboarding">Regulators</Link><Link href="/verify/AGT-0042">Verify</Link></div><div><Link href="/login">Login</Link><Link href="/register">Get Started</Link></div><div><Link href="/help">Docs</Link></div></div>
+          <div className="landing-footer-links"><div><a href="#how-it-works">How it works</a><Link href="/register">Farmers</Link></div><div><Link href="/onboarding">Regulators</Link><Link href="/verify">Verify</Link></div><div><Link href="/login">Login</Link><Link href="/register">Get Started</Link></div><div><Link href="/help">Docs</Link></div></div>
         </div>
         <div className="landing-container landing-footer-bottom"><span>Every harvest. Every handoff. On-chain.</span><p>© 2026 AgriTrust. All rights reserved.</p></div>
       </footer>
